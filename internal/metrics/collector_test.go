@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nireeksha/API_LOAD_TESTER/internal/models"
+	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
 )
 
 func TestPercentileBasic(t *testing.T) {
@@ -158,5 +158,107 @@ func TestCollectorEmptySummary(t *testing.T) {
 	}
 	if summary.MinLatency != 0 || summary.MaxLatency != 0 {
 		t.Errorf("expected zero min/max latency for empty summary, got min=%v max=%v", summary.MinLatency, summary.MaxLatency)
+	}
+}
+
+func TestCollectorSnapshotBeforeStart(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 1)
+	snap := c.Snapshot()
+	if snap.Elapsed != 0 {
+		t.Errorf("Elapsed = %v, want 0 before Start()", snap.Elapsed)
+	}
+	if snap.TotalRequests != 0 {
+		t.Errorf("TotalRequests = %d, want 0", snap.TotalRequests)
+	}
+}
+
+func TestCollectorSnapshotDuringRun(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 2)
+	c.Start()
+
+	c.Record(models.RequestResult{StatusCode: 200, Latency: 10 * time.Millisecond, Success: true, BytesRead: 100})
+	c.Record(models.RequestResult{StatusCode: 200, Latency: 30 * time.Millisecond, Success: true, BytesRead: 100})
+	c.Record(models.RequestResult{StatusCode: 404, Latency: 20 * time.Millisecond, Success: false, BytesRead: 50})
+
+	snap := c.Snapshot()
+
+	if snap.TotalRequests != 3 {
+		t.Errorf("TotalRequests = %d, want 3", snap.TotalRequests)
+	}
+	if snap.SuccessRequests != 2 {
+		t.Errorf("SuccessRequests = %d, want 2", snap.SuccessRequests)
+	}
+	if snap.FailedRequests != 1 {
+		t.Errorf("FailedRequests = %d, want 1", snap.FailedRequests)
+	}
+	if snap.MinLatency != 10*time.Millisecond {
+		t.Errorf("MinLatency = %v, want 10ms", snap.MinLatency)
+	}
+	if snap.MaxLatency != 30*time.Millisecond {
+		t.Errorf("MaxLatency = %v, want 30ms", snap.MaxLatency)
+	}
+	if snap.MeanLatency != 20*time.Millisecond {
+		t.Errorf("MeanLatency = %v, want 20ms", snap.MeanLatency)
+	}
+	if snap.TotalBytesRead != 250 {
+		t.Errorf("TotalBytesRead = %d, want 250", snap.TotalBytesRead)
+	}
+	if snap.StatusCodeCounts[200] != 2 {
+		t.Errorf("StatusCodeCounts[200] = %d, want 2", snap.StatusCodeCounts[200])
+	}
+	if snap.Elapsed <= 0 {
+		t.Errorf("Elapsed = %v, want > 0 while run is active", snap.Elapsed)
+	}
+}
+
+func TestCollectorSnapshotMatchesSummaryAfterStop(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 1)
+	c.Start()
+	c.Record(models.RequestResult{StatusCode: 200, Latency: 15 * time.Millisecond, Success: true, BytesRead: 20})
+	c.Stop()
+
+	snap := c.Snapshot()
+	summary := c.Summary()
+
+	if snap.TotalRequests != summary.TotalRequests {
+		t.Errorf("Snapshot.TotalRequests = %d, Summary.TotalRequests = %d, want equal", snap.TotalRequests, summary.TotalRequests)
+	}
+	if snap.MinLatency != summary.MinLatency {
+		t.Errorf("Snapshot.MinLatency = %v, Summary.MinLatency = %v, want equal", snap.MinLatency, summary.MinLatency)
+	}
+	if snap.Elapsed != summary.TotalDuration {
+		t.Errorf("Snapshot.Elapsed = %v, Summary.TotalDuration = %v, want equal after Stop()", snap.Elapsed, summary.TotalDuration)
+	}
+}
+
+func TestCollectorRawResultsDisabledByDefault(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 1)
+	c.Record(models.RequestResult{StatusCode: 200, Latency: time.Millisecond, Success: true})
+
+	if raw := c.RawResults(); len(raw) != 0 {
+		t.Errorf("RawResults() len = %d, want 0 when WithRawResults() not used", len(raw))
+	}
+}
+
+func TestCollectorRawResultsEnabled(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 1, WithRawResults())
+
+	c.Record(models.RequestResult{StatusCode: 200, Latency: 5 * time.Millisecond, Success: true, WorkerID: 0})
+	c.Record(models.RequestResult{StatusCode: 500, Latency: 8 * time.Millisecond, Success: false, WorkerID: 1, Err: errors.New("boom")})
+
+	raw := c.RawResults()
+	if len(raw) != 2 {
+		t.Fatalf("RawResults() len = %d, want 2", len(raw))
+	}
+	if raw[0].StatusCode != 200 || raw[1].StatusCode != 500 {
+		t.Errorf("RawResults() did not preserve insertion order/content: %+v", raw)
+	}
+
+	// Mutating the returned slice must not affect the collector's
+	// internal state, since RawResults() returns a copy.
+	raw[0].StatusCode = 999
+	rawAgain := c.RawResults()
+	if rawAgain[0].StatusCode != 200 {
+		t.Errorf("RawResults() leaked internal slice: got %d, want 200", rawAgain[0].StatusCode)
 	}
 }
