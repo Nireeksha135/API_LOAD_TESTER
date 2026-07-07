@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/api-load-tester/internal/models"
+	"github.com/Nireeksha/API_LOAD_TESTER/internal/models"
 )
 
 func TestPercentileBasic(t *testing.T) {
