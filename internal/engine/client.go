@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/example/api-load-tester/internal/config"
+	"github.com/Nireeksha/API_LOAD_TESTER/internal/config"
 )
 
 // NewHTTPClient builds an *http.Client tuned for load testing based
