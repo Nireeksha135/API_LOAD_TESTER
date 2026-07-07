@@ -1,7 +1,9 @@
 // Package metrics provides a thread-safe collector that ingests
 // individual request results produced by concurrent workers and
-// aggregates them into a final statistical Summary (latency
-// percentiles, status code breakdown, throughput, etc.).
+// aggregates them into both a live-updating Snapshot (cheap, O(1)
+// running counters for the terminal dashboard) and a final
+// statistical Summary (latency percentiles, status code breakdown,
+// throughput, etc.) once a run completes.
 package metrics
 
 import (
@@ -9,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nireeksha/API_LOAD_TESTER/internal/models"
+	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
 )
 
 // maxTrackedErrors caps how many distinct error messages the
@@ -17,9 +19,23 @@ import (
 // is returning a huge variety of transport errors.
 const maxTrackedErrors = 25
 
+// Option configures optional Collector behavior at construction time.
+type Option func(*Collector)
+
+// WithRawResults enables retention of every individual RequestResult
+// in memory (in addition to the aggregated running counters), which
+// is required for exporting a full per-request CSV report. It is
+// off by default to keep memory usage flat for very large runs.
+func WithRawResults() Option {
+	return func(c *Collector) {
+		c.keepRaw = true
+	}
+}
+
 // Collector accumulates RequestResult values from many concurrent
-// worker goroutines and produces an aggregated models.Summary. All
-// exported methods are safe for concurrent use.
+// worker goroutines and produces both cheap point-in-time Snapshots
+// and a final aggregated models.Summary. All exported methods are
+// safe for concurrent use.
 type Collector struct {
 	mu sync.Mutex
 
@@ -35,19 +51,27 @@ type Collector struct {
 	failedRequests  int64
 	totalBytesRead  int64
 
+	minLatency time.Duration
+	maxLatency time.Duration
+	sumLatency time.Duration
+
 	statusCodeCounts map[int]int64
 	latencies        []time.Duration
 
 	errorSet   map[string]struct{}
 	errorOrder []string
+
+	keepRaw    bool
+	rawResults []models.RequestResult
 }
 
 // NewCollector creates a new Collector for a run against targetURL
 // using the given HTTP method and concurrency level. The method and
 // concurrency values are purely descriptive and are copied verbatim
-// into the final Summary.
-func NewCollector(targetURL, method string, concurrency int) *Collector {
-	return &Collector{
+// into the final Summary. Optional behavior (such as raw per-request
+// retention for CSV export) is enabled via Option values.
+func NewCollector(targetURL, method string, concurrency int, opts ...Option) *Collector {
+	c := &Collector{
 		targetURL:        targetURL,
 		method:           method,
 		concurrency:      concurrency,
@@ -56,6 +80,16 @@ func NewCollector(targetURL, method string, concurrency int) *Collector {
 		errorSet:         make(map[string]struct{}, maxTrackedErrors),
 		errorOrder:       make([]string, 0, maxTrackedErrors),
 	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	if c.keepRaw {
+		c.rawResults = make([]models.RequestResult, 0, 1024)
+	}
+
+	return c
 }
 
 // Start records the wall-clock start time of the load test run. It
@@ -87,6 +121,19 @@ func (c *Collector) Record(result models.RequestResult) {
 	c.latencies = append(c.latencies, result.Latency)
 	c.statusCodeCounts[result.StatusCode]++
 	c.totalBytesRead += result.BytesRead
+	c.sumLatency += result.Latency
+
+	if c.totalRequests == 1 {
+		c.minLatency = result.Latency
+		c.maxLatency = result.Latency
+	} else {
+		if result.Latency < c.minLatency {
+			c.minLatency = result.Latency
+		}
+		if result.Latency > c.maxLatency {
+			c.maxLatency = result.Latency
+		}
+	}
 
 	if result.Success {
 		c.successRequests++
@@ -101,6 +148,10 @@ func (c *Collector) Record(result models.RequestResult) {
 			c.errorOrder = append(c.errorOrder, msg)
 		}
 	}
+
+	if c.keepRaw {
+		c.rawResults = append(c.rawResults, result)
+	}
 }
 
 // TotalRequestsSoFar returns the number of results recorded so far.
@@ -112,10 +163,97 @@ func (c *Collector) TotalRequestsSoFar() int64 {
 	return c.totalRequests
 }
 
+// RawResults returns a copy of every individual RequestResult
+// recorded so far. It only returns data if the Collector was
+// constructed with WithRawResults(); otherwise it returns an empty
+// slice. Used by the CSV exporter to produce a per-request report.
+func (c *Collector) RawResults() []models.RequestResult {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]models.RequestResult, len(c.rawResults))
+	copy(out, c.rawResults)
+	return out
+}
+
+// Snapshot is a cheap, point-in-time view of the collector's running
+// counters, computed in O(1) with respect to the number of requests
+// recorded so far (it does not sort latencies or compute
+// percentiles). It is intended to be polled frequently (e.g. every
+// 200ms) by a live terminal dashboard without adding meaningful
+// overhead to a run in progress.
+type Snapshot struct {
+	// Elapsed is the time since the run started (or the full run
+	// duration, if the run has already stopped).
+	Elapsed time.Duration
+
+	TotalRequests     int64
+	SuccessRequests   int64
+	FailedRequests    int64
+	RequestsPerSecond float64
+
+	StatusCodeCounts map[int]int64
+
+	MinLatency  time.Duration
+	MaxLatency  time.Duration
+	MeanLatency time.Duration
+
+	TotalBytesRead int64
+}
+
+// Snapshot returns the current running statistics. Safe to call at
+// any time, including before Start() (in which case Elapsed is 0)
+// and after Stop() (in which case Elapsed reflects the final run
+// duration).
+func (c *Collector) Snapshot() Snapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var elapsed time.Duration
+	switch {
+	case c.startTime.IsZero():
+		elapsed = 0
+	case !c.endTime.IsZero():
+		elapsed = c.endTime.Sub(c.startTime)
+	default:
+		elapsed = time.Since(c.startTime)
+	}
+
+	var mean time.Duration
+	if c.totalRequests > 0 {
+		mean = time.Duration(int64(c.sumLatency) / c.totalRequests)
+	}
+
+	var rps float64
+	if seconds := elapsed.Seconds(); seconds > 0 {
+		rps = float64(c.totalRequests) / seconds
+	}
+
+	statusCodeCounts := make(map[int]int64, len(c.statusCodeCounts))
+	for code, count := range c.statusCodeCounts {
+		statusCodeCounts[code] = count
+	}
+
+	return Snapshot{
+		Elapsed:           elapsed,
+		TotalRequests:     c.totalRequests,
+		SuccessRequests:   c.successRequests,
+		FailedRequests:    c.failedRequests,
+		RequestsPerSecond: rps,
+		StatusCodeCounts:  statusCodeCounts,
+		MinLatency:        c.minLatency,
+		MaxLatency:        c.maxLatency,
+		MeanLatency:       mean,
+		TotalBytesRead:    c.totalBytesRead,
+	}
+}
+
 // Summary computes and returns the final aggregated models.Summary
 // from all results recorded so far. It may be called after Stop() to
 // produce the definitive end-of-run report, or mid-run for a partial
-// snapshot (e.g. on graceful shutdown via Ctrl+C).
+// snapshot (e.g. on graceful shutdown via Ctrl+C). Unlike Snapshot,
+// Summary sorts all recorded latencies to compute accurate
+// percentiles, so it is more expensive and intended to be called once
+// (or a handful of times), not polled in a tight loop.
 func (c *Collector) Summary() models.Summary {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -124,18 +262,9 @@ func (c *Collector) Summary() models.Summary {
 	copy(latencies, c.latencies)
 	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
 
-	var minLatency, maxLatency, sumLatency time.Duration
-	if len(latencies) > 0 {
-		minLatency = latencies[0]
-		maxLatency = latencies[len(latencies)-1]
-		for _, l := range latencies {
-			sumLatency += l
-		}
-	}
-
 	var meanLatency time.Duration
-	if len(latencies) > 0 {
-		meanLatency = time.Duration(int64(sumLatency) / int64(len(latencies)))
+	if c.totalRequests > 0 {
+		meanLatency = time.Duration(int64(c.sumLatency) / c.totalRequests)
 	}
 
 	end := c.endTime
@@ -173,8 +302,8 @@ func (c *Collector) Summary() models.Summary {
 		SuccessRequests:          c.successRequests,
 		FailedRequests:           c.failedRequests,
 		StatusCodeCounts:         statusCodeCounts,
-		MinLatency:               minLatency,
-		MaxLatency:               maxLatency,
+		MinLatency:               c.minLatency,
+		MaxLatency:               c.maxLatency,
 		MeanLatency:              meanLatency,
 		P50:                      Percentile(latencies, 50),
 		P95:                      Percentile(latencies, 95),
