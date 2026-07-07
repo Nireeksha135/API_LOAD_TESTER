@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/example/api-load-tester/internal/config"
+	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 )
 
 // requestTemplate holds the immutable, pre-computed pieces needed to
