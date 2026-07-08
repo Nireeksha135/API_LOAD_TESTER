@@ -18,5 +18,5 @@ func NewLogger(verbose bool) *log.Logger {
 	if !verbose {
 		return log.New(io.Discard, "", 0)
 	}
-	return log.New(os.Stderr, "[API_LEAD_TESTER] ", log.LstdFlags|log.Lmicroseconds)
+	return log.New(os.Stderr, "[api-load-tester] ", log.LstdFlags|log.Lmicroseconds)
 }
