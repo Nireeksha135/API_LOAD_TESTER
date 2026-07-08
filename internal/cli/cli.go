@@ -3,12 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
+	"os"
 
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/engine"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/exporter"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/metrics"
+	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/reporter"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/utils"
 )
@@ -20,14 +21,23 @@ import (
 //
 // ctx governs the entire operation; cancelling it (e.g. from a
 // SIGINT handler in main) triggers the engine's graceful shutdown
-// path and Run still returns cleanly with whatever partial results
-// were collected.
+// path, and Run still returns cleanly with whatever partial results
+// were collected up to that point.
 //
 // stdout is used for the live dashboard and final report; stderr is
-// used only for verbose per-request logging (via internal/utils.NewLogger).
-func Run(ctx context.Context, cfg *config.Config, stdout io.Writer, stderr io.Writer) error {
+// used only for verbose per-request logging (via utils.NewLogger).
+// Both are *os.File (rather than io.Writer) because the live
+// dashboard needs to detect whether stdout is an interactive TTY to
+// decide between in-place ANSI redraws and plain append-only lines.
+func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.File) error {
 	if cfg == nil {
 		return fmt.Errorf("cli: config must not be nil")
+	}
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	if stderr == nil {
+		stderr = os.Stderr
 	}
 
 	// Raw per-request results are only needed (and only kept in
@@ -39,8 +49,6 @@ func Run(ctx context.Context, cfg *config.Config, stdout io.Writer, stderr io.Wr
 	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency, collectorOpts...)
 
 	logger := utils.NewLogger(cfg.Verbose)
-	// Route the verbose logger to stderr explicitly, in case a
-	// caller-supplied stderr differs from os.Stderr (e.g. in tests).
 	if cfg.Verbose {
 		logger.SetOutput(stderr)
 	}
@@ -50,42 +58,36 @@ func Run(ctx context.Context, cfg *config.Config, stdout io.Writer, stderr io.Wr
 		return fmt.Errorf("cli: failed to initialize engine: %w", err)
 	}
 
-	stdoutFile, dashboardEnabled := stdout.(interface {
-		io.Writer
-		Fd() uintptr
-	})
-
-	var (
-		summaryResult modelsSummaryHolder
-		runErr        error
-	)
+	// runResult carries the engine's outcome from the background
+	// goroutine back to the main goroutine. It is only read after
+	// <-done, so no additional synchronization is required beyond
+	// the channel close itself (which establishes happens-before).
+	type runResult struct {
+		summary models.Summary
+		err     error
+	}
+	resultCh := make(chan runResult, 1)
 
 	dashCtx, cancelDash := context.WithCancel(ctx)
 	defer cancelDash()
 
-	done := make(chan struct{})
 	go func() {
-		defer close(done)
 		summary, err := eng.Run(ctx)
-		summaryResult.set(summary)
-		runErr = err
+		resultCh <- runResult{summary: summary, err: err}
 		cancelDash()
 	}()
 
-	if dashboardEnabled {
-		dash := reporter.NewDashboardFromWriter(cfg, collector, stdoutFile)
-		dash.Run(dashCtx)
-	} else {
-		<-dashCtx.Done()
+	// Render the live dashboard in the foreground until the engine
+	// goroutine signals completion via cancelDash().
+	dash := reporter.NewDashboard(cfg, collector, stdout)
+	dash.Run(dashCtx)
+
+	result := <-resultCh
+	if result.err != nil {
+		return fmt.Errorf("cli: load test run failed: %w", result.err)
 	}
 
-	<-done
-
-	if runErr != nil {
-		return fmt.Errorf("cli: load test run failed: %w", runErr)
-	}
-
-	summary := summaryResult.get()
+	summary := result.summary
 
 	reporter.PrintSummary(stdout, summary)
 
