@@ -1,5 +1,4 @@
-// Package exporter writes final load test results to disk in CSV
-// (per-request detail) and JSON (aggregated summary) formats.
+
 package exporter
 
 import (
@@ -22,11 +21,7 @@ var csvHeader = []string{
 	"error",
 }
 
-// ExportCSV writes one row per individual models.RequestResult to
-// path, including a header row, in the order the results are
-// supplied. Callers typically pass the output of
-// (*metrics.Collector).RawResults(), which is only populated when the
-// collector was constructed with metrics.WithRawResults().
+// ExportCSV writes one row per individual models.
 func ExportCSV(path string, results []models.RequestResult) error {
 	f, err := os.Create(path)
 	if err != nil {
