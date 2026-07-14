@@ -14,21 +14,6 @@ import (
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/utils"
 )
 
-// Run executes a full load test end-to-end from a parsed Config: it
-// builds the collector and engine, runs the engine in the background
-// while a live Dashboard renders progress in the foreground, prints
-// the final static report, and writes any requested CSV/JSON exports.
-//
-// ctx governs the entire operation; cancelling it (e.g. from a
-// SIGINT handler in main) triggers the engine's graceful shutdown
-// path, and Run still returns cleanly with whatever partial results
-// were collected up to that point.
-//
-// stdout is used for the live dashboard and final report; stderr is
-// used only for verbose per-request logging (via utils.NewLogger).
-// Both are *os.File (rather than io.Writer) because the live
-// dashboard needs to detect whether stdout is an interactive TTY to
-// decide between in-place ANSI redraws and plain append-only lines.
 func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.File) error {
 	if cfg == nil {
 		return fmt.Errorf("cli: config must not be nil")
@@ -40,8 +25,7 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 		stderr = os.Stderr
 	}
 
-	// Raw per-request results are only needed (and only kept in
-	// memory) if a CSV export was requested.
+
 	var collectorOpts []metrics.Option
 	if cfg.OutputCSV != "" {
 		collectorOpts = append(collectorOpts, metrics.WithRawResults())
@@ -58,10 +42,6 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 		return fmt.Errorf("cli: failed to initialize engine: %w", err)
 	}
 
-	// runResult carries the engine's outcome from the background
-	// goroutine back to the main goroutine. It is only read after
-	// <-done, so no additional synchronization is required beyond
-	// the channel close itself (which establishes happens-before).
 	type runResult struct {
 		summary models.Summary
 		err     error
@@ -77,8 +57,6 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 		cancelDash()
 	}()
 
-	// Render the live dashboard in the foreground until the engine
-	// goroutine signals completion via cancelDash().
 	dash := reporter.NewDashboard(cfg, collector, stdout)
 	dash.Run(dashCtx)
 
