@@ -1,6 +1,4 @@
 // Package cli parses command-line arguments into a validated
-// config.Config, using only the standard library "flag" package so
-// the tool has zero external dependencies.
 package cli
 
 import (
@@ -13,10 +11,6 @@ import (
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 )
 
-// headerFlags implements flag.Value so repeated -H flags can be
-// collected into a slice, e.g.:
-//
-//	-H "Authorization: Bearer xyz" -H "X-Request-ID: abc"
 type headerFlags []string
 
 func (h *headerFlags) String() string {
@@ -31,9 +25,6 @@ func (h *headerFlags) Set(value string) error {
 	return nil
 }
 
-// Options holds everything parsed directly from the command line,
-// including values that are not part of config.Config itself (such
-// as output destinations and the help/version flags).
 type Options struct {
 	Config *config.Config
 
@@ -41,10 +32,6 @@ type Options struct {
 	ShowVersion bool
 }
 
-// ParseArgs parses args (typically os.Args[1:]) into an Options
-// struct. errOut receives usage/help text when -h/--help is passed.
-// A non-nil error means parsing or validation failed and the CLI
-// should exit with a non-zero status after printing the error.
 func ParseArgs(args []string, errOut io.Writer) (*Options, error) {
 	fs := flag.NewFlagSet("api-load-tester", flag.ContinueOnError)
 	fs.SetOutput(errOut)
@@ -139,8 +126,6 @@ func ParseArgs(args []string, errOut io.Writer) (*Options, error) {
 	return opts, nil
 }
 
-// usageText is printed above the auto-generated flag list when -h,
-// --help, or an invalid flag is supplied.
 const usageText = `api-load-tester - a concurrent HTTP API load testing tool
 
 USAGE:
