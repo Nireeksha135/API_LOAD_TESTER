@@ -12,10 +12,7 @@ import (
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
 )
 
-// Engine ties together a Config, an HTTP client, a request template,
-// and a metrics.Collector to execute a full load test run: spinning
-// up a worker pool, dispatching requests (either a fixed count or for
-// a fixed duration), and producing a final models.Summary.
+
 type Engine struct {
 	cfg       *config.Config
 	client    *http.Client
@@ -25,12 +22,6 @@ type Engine struct {
 	verbose   bool
 }
 
-// New constructs an Engine from a Config and a metrics.Collector. The
-// Config is validated before anything else is built; a non-nil error
-// means the Engine was not constructed and must not be used.
-//
-// If logger is nil, a silent logger is used and verbose per-request
-// logging (cfg.Verbose) has no effect.
 func New(cfg *config.Config, collector *metrics.Collector, logger *log.Logger) (*Engine, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("engine: config must not be nil")
@@ -55,21 +46,8 @@ func New(cfg *config.Config, collector *metrics.Collector, logger *log.Logger) (
 	}, nil
 }
 
-// Run executes the load test to completion (or until ctx is
-// cancelled, e.g. via a SIGINT-triggered context for graceful
-// shutdown) and returns the resulting models.Summary.
-//
-// In duration mode, Run derives a child context bounded by
-// cfg.Duration so that workers stop automatically once the time
-// budget is exhausted, in addition to responding to cancellation of
-// the parent ctx.
-//
-// In count mode, Run guarantees that exactly cfg.TotalRequests
-// requests are attempted in total (spread across cfg.Concurrency
-// workers), unless ctx is cancelled first, in which case whatever
-// partial results were collected are still returned alongside a nil
-// error -- callers can distinguish a graceful early stop by checking
-// ctx.Err() themselves.
+// Run executes the load test to completion 
+
 func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 	if e == nil {
 		return models.Summary{}, fmt.Errorf("engine: Run called on nil Engine")
@@ -102,9 +80,8 @@ func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 	return e.collector.Summary(), nil
 }
 
-// Config returns the Engine's underlying Config. Useful for reporters
-// and exporters that need run metadata (target URL, method, etc.)
-// alongside the Summary.
+// Config returns the Engine's underlying Config. 
+
 func (e *Engine) Config() *config.Config {
 	return e.cfg
 }
