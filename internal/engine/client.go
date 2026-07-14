@@ -1,7 +1,4 @@
-// Package engine implements the core load-generation engine: HTTP
-// client construction, request building, the worker pool, and the
-// count-based / duration-based dispatch loops that drive requests
-// against the target under test.
+
 package engine
 
 import (
@@ -13,11 +10,6 @@ import (
 	"github.com/Nireeksha/API_LOAD_TESTER/internal/config"
 )
 
-// NewHTTPClient builds an *http.Client tuned for load testing based
-// on the supplied Config. Connection pooling is sized so that up to
-// cfg.MaxIdleConnsPerHost idle connections can be kept alive per
-// host, which avoids artificially throttling throughput via repeated
-// TCP/TLS handshakes when DisableKeepAlives is false.
 func NewHTTPClient(cfg *config.Config) *http.Client {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
@@ -40,10 +32,7 @@ func NewHTTPClient(cfg *config.Config) *http.Client {
 	return &http.Client{
 		Transport: transport,
 		Timeout:   cfg.Timeout,
-		// Load testing tools should not silently follow redirects by
-		// default, since that would measure the redirect target's
-		// performance instead of the configured TargetURL. Redirects
-		// are reported as their own status codes (3xx).
+
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
