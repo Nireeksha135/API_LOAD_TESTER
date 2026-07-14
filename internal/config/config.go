@@ -1,6 +1,3 @@
-// Package config defines the Config type that drives a load test run,
-// along with validation and small helper utilities (such as parsing
-// "Key: Value" header strings) used by the CLI layer to build it.
 package config
 
 import (
@@ -33,8 +30,7 @@ var validMethods = map[string]bool{
 }
 
 // Config holds all the parameters that control a single load test run.
-// It is built by the cli package from command-line flags and then
-// validated before being handed to the engine.
+
 type Config struct {
 	// TargetURL is the fully-qualified URL to send requests to.
 	TargetURL string
@@ -115,8 +111,6 @@ func NewDefaultConfig() *Config {
 	}
 }
 
-// Validate checks that the Config is internally consistent and safe
-// to execute against, returning a descriptive error if not.
 func (c *Config) Validate() error {
 	if c == nil {
 		return errors.New("config: config is nil")
@@ -172,8 +166,7 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Body != "" && (method == MethodGET || method == MethodHEAD) {
-		// Not a fatal error: some APIs do accept bodies on GET, so we
-		// only guard against the truly invalid HEAD + body combination.
+	
 		if method == MethodHEAD {
 			return errors.New("config: HTTP HEAD requests must not include a body")
 		}
@@ -182,11 +175,6 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// ParseHeaders converts a slice of "Key: Value" strings (as typically
-// supplied via repeated -H flags on the command line) into a header
-// map. It trims whitespace around both key and value and returns an
-// error if any entry is malformed (missing the ':' separator or has
-// an empty key).
 func ParseHeaders(raw []string) (map[string]string, error) {
 	headers := make(map[string]string, len(raw))
 	for _, entry := range raw {
@@ -204,8 +192,6 @@ func ParseHeaders(raw []string) (map[string]string, error) {
 	return headers, nil
 }
 
-// String returns a compact human-readable description of the Config,
-// suitable for printing at the start of a run in verbose mode.
 func (c *Config) String() string {
 	mode := fmt.Sprintf("%d requests", c.TotalRequests)
 	if c.UseDuration {
