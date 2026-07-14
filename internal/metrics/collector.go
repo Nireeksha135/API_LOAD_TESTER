@@ -1,9 +1,7 @@
 // Package metrics provides a thread-safe collector that ingests
 // individual request results produced by concurrent workers and
 // aggregates them into both a live-updating Snapshot (cheap, O(1)
-// running counters for the terminal dashboard) and a final
-// statistical Summary (latency percentiles, status code breakdown,
-// throughput, etc.) once a run completes.
+
 package metrics
 
 import (
@@ -14,28 +12,17 @@ import (
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
 )
 
-// maxTrackedErrors caps how many distinct error messages the
-// collector retains, preventing unbounded memory growth if a target
-// is returning a huge variety of transport errors.
 const maxTrackedErrors = 25
 
-// Option configures optional Collector behavior at construction time.
 type Option func(*Collector)
 
-// WithRawResults enables retention of every individual RequestResult
-// in memory (in addition to the aggregated running counters), which
-// is required for exporting a full per-request CSV report. It is
-// off by default to keep memory usage flat for very large runs.
+// WithRawResults enables retention of every individual RequestResult in memory
 func WithRawResults() Option {
 	return func(c *Collector) {
 		c.keepRaw = true
 	}
 }
 
-// Collector accumulates RequestResult values from many concurrent
-// worker goroutines and produces both cheap point-in-time Snapshots
-// and a final aggregated models.Summary. All exported methods are
-// safe for concurrent use.
 type Collector struct {
 	mu sync.Mutex
 
@@ -65,11 +52,7 @@ type Collector struct {
 	rawResults []models.RequestResult
 }
 
-// NewCollector creates a new Collector for a run against targetURL
-// using the given HTTP method and concurrency level. The method and
-// concurrency values are purely descriptive and are copied verbatim
-// into the final Summary. Optional behavior (such as raw per-request
-// retention for CSV export) is enabled via Option values.
+// NewCollector creates a new Collector for a run against targetURL using the given HTTP method and concurrency level. 
 func NewCollector(targetURL, method string, concurrency int, opts ...Option) *Collector {
 	c := &Collector{
 		targetURL:        targetURL,
@@ -92,27 +75,22 @@ func NewCollector(targetURL, method string, concurrency int, opts ...Option) *Co
 	return c
 }
 
-// Start records the wall-clock start time of the load test run. It
-// should be called exactly once, immediately before the first request
-// is dispatched.
+// Start records the wall-clock start time of the load test run.
+
 func (c *Collector) Start() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.startTime = time.Now()
 }
 
-// Stop records the wall-clock end time of the load test run. It
-// should be called exactly once, immediately after the last result
-// has been recorded.
+// Stop records the wall-clock end time of the load test run.
+
 func (c *Collector) Stop() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.endTime = time.Now()
 }
 
-// Record ingests a single RequestResult, updating all running totals
-// under the collector's mutex. It is safe to call concurrently from
-// any number of worker goroutines.
 func (c *Collector) Record(result models.RequestResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -154,19 +132,12 @@ func (c *Collector) Record(result models.RequestResult) {
 	}
 }
 
-// TotalRequestsSoFar returns the number of results recorded so far.
-// It is intended for use by progress reporting (e.g. a live counter)
-// while a run is still in progress.
 func (c *Collector) TotalRequestsSoFar() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.totalRequests
 }
 
-// RawResults returns a copy of every individual RequestResult
-// recorded so far. It only returns data if the Collector was
-// constructed with WithRawResults(); otherwise it returns an empty
-// slice. Used by the CSV exporter to produce a per-request report.
 func (c *Collector) RawResults() []models.RequestResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -175,12 +146,6 @@ func (c *Collector) RawResults() []models.RequestResult {
 	return out
 }
 
-// Snapshot is a cheap, point-in-time view of the collector's running
-// counters, computed in O(1) with respect to the number of requests
-// recorded so far (it does not sort latencies or compute
-// percentiles). It is intended to be polled frequently (e.g. every
-// 200ms) by a live terminal dashboard without adding meaningful
-// overhead to a run in progress.
 type Snapshot struct {
 	// Elapsed is the time since the run started (or the full run
 	// duration, if the run has already stopped).
@@ -247,13 +212,6 @@ func (c *Collector) Snapshot() Snapshot {
 	}
 }
 
-// Summary computes and returns the final aggregated models.Summary
-// from all results recorded so far. It may be called after Stop() to
-// produce the definitive end-of-run report, or mid-run for a partial
-// snapshot (e.g. on graceful shutdown via Ctrl+C). Unlike Snapshot,
-// Summary sorts all recorded latencies to compute accurate
-// percentiles, so it is more expensive and intended to be called once
-// (or a handful of times), not polled in a tight loop.
 func (c *Collector) Summary() models.Summary {
 	c.mu.Lock()
 	defer c.mu.Unlock()
