@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Nireeksha135/API_LOAD_TESTER/internal/metrics"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
 )
 
@@ -55,7 +56,7 @@ func (e *Engine) doRequest(ctx context.Context, workerID int) models.RequestResu
 	}
 }
 
-func (e *Engine) runWorker(ctx context.Context, workerID int, remaining *int64, wg *sync.WaitGroup) {
+func (e *Engine) runWorker(ctx context.Context, workerID int, remaining *int64, wg *sync.WaitGroup, collector *metrics.Collector) {
 	defer wg.Done()
 
 	for {
@@ -75,7 +76,7 @@ func (e *Engine) runWorker(ctx context.Context, workerID int, remaining *int64, 
 		if ctx.Err() != nil && (errors.Is(result.Err, context.Canceled) || errors.Is(result.Err, context.DeadlineExceeded)) {
 			return
 		}
-		e.collector.Record(result)
+		collector.Record(result)
 
 		if e.logger != nil && e.verbose {
 			e.logger.Printf(

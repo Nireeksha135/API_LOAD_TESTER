@@ -25,7 +25,6 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 		stderr = os.Stderr
 	}
 
-
 	var collectorOpts []metrics.Option
 	if cfg.OutputCSV != "" {
 		collectorOpts = append(collectorOpts, metrics.WithRawResults())

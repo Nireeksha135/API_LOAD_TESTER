@@ -12,7 +12,6 @@ import (
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
 )
 
-
 type Engine struct {
 	cfg       *config.Config
 	client    *http.Client
@@ -46,7 +45,7 @@ func New(cfg *config.Config, collector *metrics.Collector, logger *log.Logger) (
 	}, nil
 }
 
-// Run executes the load test to completion 
+// Run executes the load test to completion
 
 func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 	if e == nil {
@@ -69,9 +68,10 @@ func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 	}
 
 	var wg sync.WaitGroup
+	workerCollectors := e.collector.NewWorkerCollectors(e.cfg.Concurrency)
 	wg.Add(e.cfg.Concurrency)
 	for i := 0; i < e.cfg.Concurrency; i++ {
-		go e.runWorker(runCtx, i, remainingPtr, &wg)
+		go e.runWorker(runCtx, i, remainingPtr, &wg, workerCollectors[i])
 	}
 
 	wg.Wait()
@@ -80,7 +80,7 @@ func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 	return e.collector.Summary(), nil
 }
 
-// Config returns the Engine's underlying Config. 
+// Config returns the Engine's underlying Config.
 
 func (e *Engine) Config() *config.Config {
 	return e.cfg

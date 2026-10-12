@@ -1,6 +1,6 @@
-// Package metrics provides a thread-safe collector that ingests
-// individual request results produced by concurrent workers and
-// aggregates them into both a live-updating Snapshot (cheap, O(1)
+// Package metrics provides a thread-safe collector that aggregates
+// request results into live snapshots and final summaries. Latency
+// percentiles use a bounded-memory HDR histogram.
 
 package metrics
 
@@ -9,10 +9,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/HdrHistogram/hdrhistogram-go"
+
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
 )
 
-const maxTrackedErrors = 25
+const maxLatencyNanoseconds int64 = 1<<63 - 1
 
 type Option func(*Collector)
 
@@ -43,25 +45,23 @@ type Collector struct {
 	sumLatency time.Duration
 
 	statusCodeCounts map[int]int64
-	latencies        []time.Duration
-
-	errorSet   map[string]struct{}
-	errorOrder []string
+	latencies        *hdrhistogram.Histogram
+	errorCounts      map[string]int64
+	workers          []*Collector
 
 	keepRaw    bool
 	rawResults []models.RequestResult
 }
 
-// NewCollector creates a new Collector for a run against targetURL using the given HTTP method and concurrency level. 
+// NewCollector creates a new Collector for a run against targetURL using the given HTTP method and concurrency level.
 func NewCollector(targetURL, method string, concurrency int, opts ...Option) *Collector {
 	c := &Collector{
 		targetURL:        targetURL,
 		method:           method,
 		concurrency:      concurrency,
 		statusCodeCounts: make(map[int]int64),
-		latencies:        make([]time.Duration, 0, 1024),
-		errorSet:         make(map[string]struct{}, maxTrackedErrors),
-		errorOrder:       make([]string, 0, maxTrackedErrors),
+		latencies:        hdrhistogram.New(1, maxLatencyNanoseconds, 3),
+		errorCounts:      make(map[string]int64),
 	}
 
 	for _, opt := range opts {
@@ -91,12 +91,37 @@ func (c *Collector) Stop() {
 	c.endTime = time.Now()
 }
 
+// NewWorkerCollectors creates independent collectors for request workers.
+// The parent aggregates their live snapshots and final summary.
+func (c *Collector) NewWorkerCollectors(count int) []*Collector {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	workers := make([]*Collector, count)
+	for i := range workers {
+		worker := NewCollector(c.targetURL, c.method, c.concurrency)
+		if c.keepRaw {
+			worker.keepRaw = true
+			worker.rawResults = make([]models.RequestResult, 0, 1024)
+		}
+		workers[i] = worker
+	}
+	c.workers = append(c.workers, workers...)
+	return workers
+}
+
 func (c *Collector) Record(result models.RequestResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.totalRequests++
-	c.latencies = append(c.latencies, result.Latency)
+	latencyNanos := result.Latency.Nanoseconds()
+	if latencyNanos < 1 {
+		latencyNanos = 1
+	}
+	if err := c.latencies.RecordValue(latencyNanos); err != nil {
+		panic("metrics: latency outside HDR histogram range")
+	}
 	c.statusCodeCounts[result.StatusCode]++
 	c.totalBytesRead += result.BytesRead
 	c.sumLatency += result.Latency
@@ -120,11 +145,7 @@ func (c *Collector) Record(result models.RequestResult) {
 	}
 
 	if result.Err != nil {
-		msg := result.Err.Error()
-		if _, exists := c.errorSet[msg]; !exists && len(c.errorOrder) < maxTrackedErrors {
-			c.errorSet[msg] = struct{}{}
-			c.errorOrder = append(c.errorOrder, msg)
-		}
+		c.errorCounts[result.Err.Error()]++
 	}
 
 	if c.keepRaw {
@@ -135,15 +156,79 @@ func (c *Collector) Record(result models.RequestResult) {
 func (c *Collector) TotalRequestsSoFar() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.totalRequests
+	return c.aggregateLocked(false).totalRequests
 }
 
 func (c *Collector) RawResults() []models.RequestResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := make([]models.RequestResult, len(c.rawResults))
-	copy(out, c.rawResults)
+	out := append([]models.RequestResult(nil), c.rawResults...)
+	for _, worker := range c.workers {
+		worker.mu.Lock()
+		out = append(out, worker.rawResults...)
+		worker.mu.Unlock()
+	}
+	if len(c.workers) > 0 {
+		sort.Slice(out, func(i, j int) bool {
+			return out[i].Timestamp.Before(out[j].Timestamp)
+		})
+	}
 	return out
+}
+
+type aggregate struct {
+	totalRequests    int64
+	successRequests  int64
+	failedRequests   int64
+	totalBytesRead   int64
+	sumLatency       time.Duration
+	minLatency       time.Duration
+	maxLatency       time.Duration
+	statusCodeCounts map[int]int64
+	errorCounts      map[string]int64
+	latencies        *hdrhistogram.Histogram
+}
+
+func (c *Collector) aggregateLocked(includeHistogram bool) aggregate {
+	a := aggregate{
+		statusCodeCounts: make(map[int]int64, len(c.statusCodeCounts)),
+		errorCounts:      make(map[string]int64, len(c.errorCounts)),
+	}
+	if includeHistogram {
+		a.latencies = hdrhistogram.New(1, maxLatencyNanoseconds, 3)
+	}
+	a.addCollectorLocked(c, includeHistogram)
+	for _, worker := range c.workers {
+		worker.mu.Lock()
+		a.addCollectorLocked(worker, includeHistogram)
+		worker.mu.Unlock()
+	}
+	return a
+}
+
+func (a *aggregate) addCollectorLocked(c *Collector, includeHistogram bool) {
+	if c.totalRequests > 0 {
+		if a.totalRequests == 0 || c.minLatency < a.minLatency {
+			a.minLatency = c.minLatency
+		}
+		if c.maxLatency > a.maxLatency {
+			a.maxLatency = c.maxLatency
+		}
+	}
+	a.totalRequests += c.totalRequests
+	a.successRequests += c.successRequests
+	a.failedRequests += c.failedRequests
+	a.totalBytesRead += c.totalBytesRead
+	a.sumLatency += c.sumLatency
+	for code, count := range c.statusCodeCounts {
+		a.statusCodeCounts[code] += count
+	}
+	for message, count := range c.errorCounts {
+		a.errorCounts[message] += count
+	}
+	if includeHistogram {
+		a.latencies.Merge(c.latencies)
+	}
 }
 
 type Snapshot struct {
@@ -172,6 +257,7 @@ type Snapshot struct {
 func (c *Collector) Snapshot() Snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	data := c.aggregateLocked(false)
 
 	var elapsed time.Duration
 	switch {
@@ -184,45 +270,37 @@ func (c *Collector) Snapshot() Snapshot {
 	}
 
 	var mean time.Duration
-	if c.totalRequests > 0 {
-		mean = time.Duration(int64(c.sumLatency) / c.totalRequests)
+	if data.totalRequests > 0 {
+		mean = time.Duration(int64(data.sumLatency) / data.totalRequests)
 	}
 
 	var rps float64
 	if seconds := elapsed.Seconds(); seconds > 0 {
-		rps = float64(c.totalRequests) / seconds
-	}
-
-	statusCodeCounts := make(map[int]int64, len(c.statusCodeCounts))
-	for code, count := range c.statusCodeCounts {
-		statusCodeCounts[code] = count
+		rps = float64(data.totalRequests) / seconds
 	}
 
 	return Snapshot{
 		Elapsed:           elapsed,
-		TotalRequests:     c.totalRequests,
-		SuccessRequests:   c.successRequests,
-		FailedRequests:    c.failedRequests,
+		TotalRequests:     data.totalRequests,
+		SuccessRequests:   data.successRequests,
+		FailedRequests:    data.failedRequests,
 		RequestsPerSecond: rps,
-		StatusCodeCounts:  statusCodeCounts,
-		MinLatency:        c.minLatency,
-		MaxLatency:        c.maxLatency,
+		StatusCodeCounts:  data.statusCodeCounts,
+		MinLatency:        data.minLatency,
+		MaxLatency:        data.maxLatency,
 		MeanLatency:       mean,
-		TotalBytesRead:    c.totalBytesRead,
+		TotalBytesRead:    data.totalBytesRead,
 	}
 }
 
 func (c *Collector) Summary() models.Summary {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	latencies := make([]time.Duration, len(c.latencies))
-	copy(latencies, c.latencies)
-	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+	data := c.aggregateLocked(true)
 
 	var meanLatency time.Duration
-	if c.totalRequests > 0 {
-		meanLatency = time.Duration(int64(c.sumLatency) / c.totalRequests)
+	if data.totalRequests > 0 {
+		meanLatency = time.Duration(int64(data.sumLatency) / data.totalRequests)
 	}
 
 	end := c.endTime
@@ -237,17 +315,9 @@ func (c *Collector) Summary() models.Summary {
 
 	var requestsPerSecond, throughputBytesPerSecond float64
 	if seconds := totalDuration.Seconds(); seconds > 0 {
-		requestsPerSecond = float64(c.totalRequests) / seconds
-		throughputBytesPerSecond = float64(c.totalBytesRead) / seconds
+		requestsPerSecond = float64(data.totalRequests) / seconds
+		throughputBytesPerSecond = float64(data.totalBytesRead) / seconds
 	}
-
-	statusCodeCounts := make(map[int]int64, len(c.statusCodeCounts))
-	for code, count := range c.statusCodeCounts {
-		statusCodeCounts[code] = count
-	}
-
-	errs := make([]string, len(c.errorOrder))
-	copy(errs, c.errorOrder)
 
 	return models.Summary{
 		TargetURL:                c.targetURL,
@@ -256,19 +326,19 @@ func (c *Collector) Summary() models.Summary {
 		EndTime:                  end,
 		TotalDuration:            totalDuration,
 		Concurrency:              c.concurrency,
-		TotalRequests:            c.totalRequests,
-		SuccessRequests:          c.successRequests,
-		FailedRequests:           c.failedRequests,
-		StatusCodeCounts:         statusCodeCounts,
-		MinLatency:               c.minLatency,
-		MaxLatency:               c.maxLatency,
+		TotalRequests:            data.totalRequests,
+		SuccessRequests:          data.successRequests,
+		FailedRequests:           data.failedRequests,
+		StatusCodeCounts:         data.statusCodeCounts,
+		MinLatency:               data.minLatency,
+		MaxLatency:               data.maxLatency,
 		MeanLatency:              meanLatency,
-		P50:                      Percentile(latencies, 50),
-		P95:                      Percentile(latencies, 95),
-		P99:                      Percentile(latencies, 99),
+		P50:                      time.Duration(data.latencies.ValueAtQuantile(50)),
+		P95:                      time.Duration(data.latencies.ValueAtQuantile(95)),
+		P99:                      time.Duration(data.latencies.ValueAtQuantile(99)),
 		RequestsPerSecond:        requestsPerSecond,
-		TotalBytesRead:           c.totalBytesRead,
+		TotalBytesRead:           data.totalBytesRead,
 		ThroughputBytesPerSecond: throughputBytesPerSecond,
-		Errors:                   errs,
+		Errors:                   data.errorCounts,
 	}
 }

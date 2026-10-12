@@ -71,8 +71,13 @@ func PrintSummary(out io.Writer, summary models.Summary) {
 	if len(summary.Errors) > 0 {
 		fmt.Fprintln(out, subDivider)
 		fmt.Fprintln(out, "Errors observed:")
-		for _, e := range summary.Errors {
-			fmt.Fprintf(out, "  - %s\n", e)
+		errorMessages := make([]string, 0, len(summary.Errors))
+		for message := range summary.Errors {
+			errorMessages = append(errorMessages, message)
+		}
+		sort.Strings(errorMessages)
+		for _, message := range errorMessages {
+			fmt.Fprintf(out, "  - %s: %d\n", message, summary.Errors[message])
 		}
 	}
 

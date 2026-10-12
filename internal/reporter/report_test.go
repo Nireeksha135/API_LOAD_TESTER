@@ -30,7 +30,7 @@ func TestPrintSummaryContainsKeyFields(t *testing.T) {
 		RequestsPerSecond:        200.0,
 		TotalBytesRead:           1024 * 1024,
 		ThroughputBytesPerSecond: 204800,
-		Errors:                   []string{"connection refused", "context deadline exceeded"},
+		Errors:                   map[string]int64{"connection refused": 2, "context deadline exceeded": 3},
 	}
 
 	var buf bytes.Buffer
@@ -50,6 +50,8 @@ func TestPrintSummaryContainsKeyFields(t *testing.T) {
 		"ERR (no response)",
 		"connection refused",
 		"context deadline exceeded",
+		"connection refused: 2",
+		"context deadline exceeded: 3",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(output, want) {
@@ -60,11 +62,11 @@ func TestPrintSummaryContainsKeyFields(t *testing.T) {
 
 func TestPrintSummaryNoErrorsSection(t *testing.T) {
 	summary := models.Summary{
-		TargetURL:         "http://localhost:8080",
-		Method:             "GET",
-		StatusCodeCounts:   map[int]int64{200: 10},
-		TotalRequests:      10,
-		SuccessRequests:    10,
+		TargetURL:        "http://localhost:8080",
+		Method:           "GET",
+		StatusCodeCounts: map[int]int64{200: 10},
+		TotalRequests:    10,
+		SuccessRequests:  10,
 	}
 
 	var buf bytes.Buffer

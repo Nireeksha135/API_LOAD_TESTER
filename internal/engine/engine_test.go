@@ -57,6 +57,12 @@ func TestEngineRunCountMode(t *testing.T) {
 	if summary.StatusCodeCounts[200] != int64(cfg.TotalRequests) {
 		t.Errorf("StatusCodeCounts[200] = %d, want %d", summary.StatusCodeCounts[200], cfg.TotalRequests)
 	}
+	if summary.TotalBytesRead != int64(cfg.TotalRequests*len(`{"ok":true}`)) {
+		t.Errorf("TotalBytesRead = %d, want %d", summary.TotalBytesRead, cfg.TotalRequests*len(`{"ok":true}`))
+	}
+	if summary.ThroughputBytesPerSecond <= 0 {
+		t.Errorf("ThroughputBytesPerSecond = %f, want > 0", summary.ThroughputBytesPerSecond)
+	}
 }
 
 func TestEngineRunDurationMode(t *testing.T) {

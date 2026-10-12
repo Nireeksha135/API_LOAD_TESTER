@@ -2,7 +2,9 @@ package metrics
 
 import (
 	"errors"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -106,11 +108,55 @@ func TestCollectorRecordAndSummary(t *testing.T) {
 	if len(summary.Errors) != 2 {
 		t.Errorf("len(Errors) = %d, want 2", len(summary.Errors))
 	}
+	if summary.Errors["server error"] != 1 || summary.Errors["connection refused"] != 1 {
+		t.Errorf("Errors = %v, want one occurrence of each error", summary.Errors)
+	}
 	if summary.TotalDuration <= 0 {
 		t.Errorf("TotalDuration = %v, want > 0", summary.TotalDuration)
 	}
 	if summary.RequestsPerSecond <= 0 {
 		t.Errorf("RequestsPerSecond = %v, want > 0", summary.RequestsPerSecond)
+	}
+}
+
+func TestCollectorHistogramIsBoundedAndTracksPercentiles(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 1)
+	initialSize := c.latencies.ByteSize()
+	for i := 0; i < 10_000; i++ {
+		latency := time.Duration(i%3+1) * time.Millisecond
+		c.Record(models.RequestResult{StatusCode: 200, Latency: latency, Success: true})
+	}
+
+	summary := c.Summary()
+	if c.latencies.ByteSize() != initialSize {
+		t.Errorf("histogram size grew from %d to %d bytes", initialSize, c.latencies.ByteSize())
+	}
+	if c.latencies.TotalCount() != 10_000 {
+		t.Errorf("histogram count = %d, want 10000", c.latencies.TotalCount())
+	}
+	if summary.P50 < time.Millisecond || summary.P50 > 3*time.Millisecond {
+		t.Errorf("P50 = %v, want within observed range", summary.P50)
+	}
+	if summary.P95 < 2*time.Millisecond || summary.P95 > 3100*time.Microsecond {
+		t.Errorf("P95 = %v, want near upper observed values", summary.P95)
+	}
+}
+
+func TestCollectorCountsEveryError(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 1)
+	for i := 0; i < 30; i++ {
+		c.Record(models.RequestResult{Err: fmt.Errorf("failure %d", i)})
+	}
+	for i := 0; i < 4; i++ {
+		c.Record(models.RequestResult{Err: errors.New("repeated failure")})
+	}
+
+	errors := c.Summary().Errors
+	if len(errors) != 31 {
+		t.Errorf("len(Errors) = %d, want all 31 distinct messages", len(errors))
+	}
+	if errors["repeated failure"] != 4 {
+		t.Errorf("Errors[repeated failure] = %d, want 4", errors["repeated failure"])
 	}
 }
 
@@ -145,6 +191,37 @@ func TestCollectorConcurrentRecord(t *testing.T) {
 	if summary.TotalBytesRead != n*10 {
 		t.Errorf("TotalBytesRead = %d, want %d", summary.TotalBytesRead, n*10)
 	}
+}
+
+func BenchmarkCollectorRecordParallel(b *testing.B) {
+	c := NewCollector("http://example.com", "GET", 50)
+	result := models.RequestResult{StatusCode: 200, Latency: time.Millisecond, Success: true}
+	b.ReportAllocs()
+	b.SetParallelism(4)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			c.Record(result)
+		}
+	})
+}
+
+func BenchmarkCollectorRecordWorkerLocalParallel(b *testing.B) {
+	const workersCount = 64
+	parent := NewCollector("http://example.com", "GET", workersCount)
+	workers := parent.NewWorkerCollectors(workersCount)
+	result := models.RequestResult{StatusCode: 200, Latency: time.Millisecond, Success: true}
+	var nextWorker atomic.Uint64
+	b.ReportAllocs()
+	b.SetParallelism(4)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		workerID := int(nextWorker.Add(1)-1) % workersCount
+		worker := workers[workerID]
+		for pb.Next() {
+			worker.Record(result)
+		}
+	})
 }
 
 func TestCollectorEmptySummary(t *testing.T) {

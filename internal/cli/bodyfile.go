@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 )
+
 // readBodyFile reads the entire contents of path as a string, used
 func readBodyFile(path string) (string, error) {
 	data, err := os.ReadFile(path)

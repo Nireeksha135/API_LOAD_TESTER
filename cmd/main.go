@@ -1,4 +1,3 @@
-
 package main
 
 import (
@@ -19,12 +18,11 @@ func main() {
 	os.Exit(mainWithExitCode())
 }
 
-
 func mainWithExitCode() int {
 	opts, err := cli.ParseArgs(os.Args[1:], os.Stderr)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			
+
 			return 0
 		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -35,7 +33,6 @@ func mainWithExitCode() int {
 		fmt.Fprintf(os.Stdout, "api-load-tester %s\n", version)
 		return 0
 	}
-
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

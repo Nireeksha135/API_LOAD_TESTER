@@ -110,9 +110,8 @@ type Summary struct {
 	// ThroughputBytesPerSecond is TotalBytesRead / TotalDuration.Seconds().
 	ThroughputBytesPerSecond float64 `json:"throughput_bytes_per_second"`
 
-	// Errors is a de-duplicated, capped list of distinct error
-	// messages encountered during the run, useful for diagnostics.
-	Errors []string `json:"errors,omitempty"`
+	// Errors maps each distinct error message to its occurrence count.
+	Errors map[string]int64 `json:"errors,omitempty"`
 }
 
 // LatencySample is a lightweight structure used internally by the

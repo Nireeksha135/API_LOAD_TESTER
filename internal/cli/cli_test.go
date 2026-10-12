@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -198,17 +199,19 @@ func TestParseArgsRejectsHeadBody(t *testing.T) {
 	}
 }
 
-func TestRunEndToEndCountMode(t *testing.T) {
+func TestParseArgsAndRunEndToEndCountMode(t *testing.T) {
+	var requests int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requests, 1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	cfg := config.NewDefaultConfig()
-	cfg.TargetURL = server.URL
-	cfg.Concurrency = 5
-	cfg.TotalRequests = 25
-	cfg.Timeout = 5 * time.Second
+	var errOut bytes.Buffer
+	opts, err := ParseArgs([]string{"-url", server.URL, "-c", "5", "-n", "25"}, &errOut)
+	if err != nil {
+		t.Fatalf("ParseArgs() error = %v", err)
+	}
 
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
@@ -232,7 +235,7 @@ func TestRunEndToEndCountMode(t *testing.T) {
 		close(done)
 	}()
 
-	runErr := Run(context.Background(), cfg, stdoutW, os.Stderr)
+	runErr := Run(context.Background(), opts.Config, stdoutW, os.Stderr)
 	stdoutW.Close()
 	<-done
 
@@ -244,6 +247,9 @@ func TestRunEndToEndCountMode(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "Total Requests:    25") {
 		t.Errorf("Run() stdout missing expected request count, got:\n%s", output.String())
+	}
+	if got := atomic.LoadInt64(&requests); got != 25 {
+		t.Errorf("server received %d requests, want 25", got)
 	}
 }
 

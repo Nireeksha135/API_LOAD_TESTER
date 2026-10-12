@@ -33,7 +33,7 @@ type jsonSummary struct {
 	RequestsPerSecond        float64          `json:"requests_per_second"`
 	TotalBytesRead           int64            `json:"total_bytes_read"`
 	ThroughputBytesPerSecond float64          `json:"throughput_bytes_per_second"`
-	Errors                   []string         `json:"errors,omitempty"`
+	Errors                   map[string]int64 `json:"errors,omitempty"`
 }
 
 // ExportJSON marshals the aggregated models.Summary to indented JSON

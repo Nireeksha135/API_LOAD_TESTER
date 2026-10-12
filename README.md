@@ -30,6 +30,8 @@ The project focuses on **concurrency, worker pools, HTTP networking, thread-safe
 - Custom HTTP headers
 - JSON and raw request bodies
 - Per-request latency tracking
+- Bounded-memory HDR histogram percentiles
+- Error counts grouped by message
 - Min / Max / Mean latency
 - P50 / P95 / P99 percentiles
 - Requests Per Second (RPS)
@@ -63,7 +65,7 @@ Performance Analysis
 Terminal / CSV / JSON
 ```
 
-The worker pool distributes requests across concurrent workers while a thread-safe metrics collector tracks latency, throughput, request rates, and HTTP responses.
+Each worker records results in its own collector. Live dashboard snapshots aggregate those collectors, and the final summary merges their counters and HDR histograms. This keeps request recording contention low while latency memory stays bounded for long duration runs.
 
 ---
 
@@ -82,6 +84,7 @@ The tool measures:
 | P95 | 95th percentile latency |
 | P99 | 99th percentile latency |
 | Status Codes | HTTP response distribution |
+| Errors | Count of each distinct error message |
 
 ---
 
@@ -150,6 +153,13 @@ Run with Go's race detector:
 
 ```bash
 go test -race ./...
+```
+
+Run static analysis and check formatting:
+
+```bash
+go vet ./...
+test -z "$(gofmt -l $(find . -type f -name '*.go' -not -path './vendor/*'))"
 ```
 
 ---

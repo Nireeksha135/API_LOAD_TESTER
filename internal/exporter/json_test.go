@@ -34,7 +34,7 @@ func TestExportJSON(t *testing.T) {
 		RequestsPerSecond:        200,
 		TotalBytesRead:           2048000,
 		ThroughputBytesPerSecond: 204800,
-		Errors:                   []string{"timeout"},
+		Errors:                   map[string]int64{"timeout": 4},
 	}
 
 	if err := ExportJSON(path, summary); err != nil {
@@ -72,9 +72,9 @@ func TestExportJSON(t *testing.T) {
 		t.Errorf("status_code_counts[201] = %v, want 1950", statusCodes["201"])
 	}
 
-	errs, ok := parsed["errors"].([]interface{})
-	if !ok || len(errs) != 1 || errs[0] != "timeout" {
-		t.Errorf("errors = %v, want [\"timeout\"]", parsed["errors"])
+	errs, ok := parsed["errors"].(map[string]interface{})
+	if !ok || len(errs) != 1 || errs["timeout"] != float64(4) {
+		t.Errorf("errors = %v, want {\"timeout\": 4}", parsed["errors"])
 	}
 }
 
@@ -83,11 +83,11 @@ func TestExportJSONOmitsEmptyErrors(t *testing.T) {
 	path := filepath.Join(dir, "summary_no_errors.json")
 
 	summary := models.Summary{
-		TargetURL:         "http://localhost",
-		Method:             "GET",
-		StatusCodeCounts:   map[int]int64{200: 10},
-		TotalRequests:      10,
-		SuccessRequests:    10,
+		TargetURL:        "http://localhost",
+		Method:           "GET",
+		StatusCodeCounts: map[int]int64{200: 10},
+		TotalRequests:    10,
+		SuccessRequests:  10,
 	}
 
 	if err := ExportJSON(path, summary); err != nil {
