@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Nireeksha/API_LOAD_TESTER/internal/models"
-	"github.com/Nireeksha/API_LOAD_TESTER/internal/utils"
+	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
+	"github.com/Nireeksha135/API_LOAD_TESTER/internal/utils"
 )
 
 // reportWidth is the fixed character width of the static final report.

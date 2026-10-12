@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Nireeksha/API_LOAD_TESTER/internal/config"
+	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 )
 
 func NewHTTPClient(cfg *config.Config) *http.Client {

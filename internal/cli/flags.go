@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 )
