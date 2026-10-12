@@ -153,7 +153,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("config: total requests must be greater than 0, got %d", c.TotalRequests)
 		}
 		if c.Concurrency > c.TotalRequests {
-			return fmt.Errorf("config: concurrency (%d) must not exceed total requests (%d)", c.Concurrency, c.TotalRequests)
+			c.Concurrency = c.TotalRequests
 		}
 	}
 
@@ -165,11 +165,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: max idle conns per host must be greater than 0, got %d", c.MaxIdleConnsPerHost)
 	}
 
-	if c.Body != "" && (method == MethodGET || method == MethodHEAD) {
-	
-		if method == MethodHEAD {
-			return errors.New("config: HTTP HEAD requests must not include a body")
-		}
+	if c.Body != "" && method == MethodHEAD {
+		return errors.New("config: HTTP HEAD requests must not include a body")
 	}
 
 	return nil

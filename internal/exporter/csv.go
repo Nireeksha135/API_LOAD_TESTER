@@ -12,7 +12,7 @@ import (
 
 // csvHeader defines the column order for the exported CSV file.
 var csvHeader = []string{
-	"timestamp",
+	"start_time",
 	"worker_id",
 	"status_code",
 	"latency_ms",

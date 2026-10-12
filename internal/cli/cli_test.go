@@ -170,6 +170,34 @@ func TestParseArgsInvalidConcurrencyPropagatesValidationError(t *testing.T) {
 	}
 }
 
+func TestParseArgsClampsConcurrencyAndAllowsGetBody(t *testing.T) {
+	var errOut bytes.Buffer
+	opts, err := ParseArgs([]string{
+		"-url", "https://api.example.com",
+		"-c", "10",
+		"-n", "2",
+		"-body", "payload",
+	}, &errOut)
+	if err != nil {
+		t.Fatalf("ParseArgs() error = %v", err)
+	}
+	if opts.Config.Concurrency != 2 {
+		t.Errorf("Concurrency = %d, want clamped value 2", opts.Config.Concurrency)
+	}
+}
+
+func TestParseArgsRejectsHeadBody(t *testing.T) {
+	var errOut bytes.Buffer
+	_, err := ParseArgs([]string{
+		"-url", "https://api.example.com",
+		"-method", "HEAD",
+		"-body", "payload",
+	}, &errOut)
+	if err == nil {
+		t.Error("ParseArgs() with a HEAD body: expected validation error, got nil")
+	}
+}
+
 func TestRunEndToEndCountMode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

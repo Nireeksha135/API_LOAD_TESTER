@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"sync"
@@ -71,6 +72,9 @@ func (e *Engine) runWorker(ctx context.Context, workerID int, remaining *int64, 
 		}
 
 		result := e.doRequest(ctx, workerID)
+		if ctx.Err() != nil && (errors.Is(result.Err, context.Canceled) || errors.Is(result.Err, context.DeadlineExceeded)) {
+			return
+		}
 		e.collector.Record(result)
 
 		if e.logger != nil && e.verbose {

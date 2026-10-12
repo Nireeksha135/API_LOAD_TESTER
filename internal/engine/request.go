@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 )
@@ -49,7 +50,11 @@ func (t *requestTemplate) newRequest(ctx context.Context) (*http.Request, error)
 	}
 
 	for k, v := range t.headers {
-		req.Header.Set(k, v)
+		if strings.EqualFold(k, "Host") {
+			req.Host = v
+		} else {
+			req.Header.Set(k, v)
+		}
 	}
 
 	if t.contentType != "" && req.Header.Get("Content-Type") == "" {

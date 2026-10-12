@@ -54,7 +54,7 @@ func TestExportCSV(t *testing.T) {
 		t.Fatalf("len(rows) = %d, want 3", len(rows))
 	}
 
-	if rows[0][0] != "timestamp" || rows[0][2] != "status_code" {
+	if rows[0][0] != "start_time" || rows[0][2] != "status_code" {
 		t.Errorf("unexpected header row: %v", rows[0])
 	}
 

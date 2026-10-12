@@ -141,6 +141,95 @@ func TestEngineRunPostWithBody(t *testing.T) {
 	}
 }
 
+func TestEngineRunUsesHostHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != "virtual.example.com" {
+			t.Errorf("Host = %q, want %q", r.Host, "virtual.example.com")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := newTestConfig(server.URL)
+	cfg.TotalRequests = 1
+	cfg.Concurrency = 1
+	cfg.Headers = map[string]string{"hOsT": "virtual.example.com"}
+	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency)
+	eng, err := New(cfg, collector, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	summary, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if summary.SuccessRequests != 1 {
+		t.Errorf("SuccessRequests = %d, want 1", summary.SuccessRequests)
+	}
+}
+
+func TestEngineRunDropsRunCancellationResults(t *testing.T) {
+	requestStarted := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case requestStarted <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	cfg := newTestConfig(server.URL)
+	cfg.UseDuration = true
+	cfg.Duration = 100 * time.Millisecond
+	cfg.Concurrency = 1
+	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency)
+	eng, err := New(cfg, collector, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	summary, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	select {
+	case <-requestStarted:
+	default:
+		t.Fatal("request did not start before run cancellation")
+	}
+	if summary.TotalRequests != 0 {
+		t.Errorf("TotalRequests = %d, want 0 for cancelled in-flight request", summary.TotalRequests)
+	}
+}
+
+func TestEngineRunCountsPerRequestTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := newTestConfig(server.URL)
+	cfg.TotalRequests = 1
+	cfg.Concurrency = 1
+	cfg.Timeout = 20 * time.Millisecond
+	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency)
+	eng, err := New(cfg, collector, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	summary, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if summary.FailedRequests != 1 {
+		t.Errorf("FailedRequests = %d, want 1 for per-request timeout", summary.FailedRequests)
+	}
+}
+
 func TestEngineRunHandlesTargetDown(t *testing.T) {
 	// A server that is created and immediately closed yields a URL
 	// nothing is listening on, guaranteeing connection failures.
