@@ -34,6 +34,10 @@ func PrintSummary(out io.Writer, summary models.Summary) {
 	fmt.Fprintln(out, subDivider)
 
 	fmt.Fprintf(out, "Total Requests:    %d\n", summary.TotalRequests)
+	if summary.TargetRPS > 0 {
+		fmt.Fprintf(out, "Target RPS:        %.2f\n", summary.TargetRPS)
+		fmt.Fprintf(out, "Scheduled:         %d  Dropped: %d\n", summary.ScheduledRequests, summary.DroppedRequests)
+	}
 	fmt.Fprintf(out, "Successful:        %d\n", summary.SuccessRequests)
 	fmt.Fprintf(out, "Failed:            %d\n", summary.FailedRequests)
 	fmt.Fprintf(out, "Requests/sec:      %.2f\n", summary.RequestsPerSecond)
@@ -45,8 +49,10 @@ func PrintSummary(out io.Writer, summary models.Summary) {
 	fmt.Fprintf(out, "  Min:             %s\n", utils.FormatDuration(summary.MinLatency))
 	fmt.Fprintf(out, "  Mean:            %s\n", utils.FormatDuration(summary.MeanLatency))
 	fmt.Fprintf(out, "  P50:             %s\n", utils.FormatDuration(summary.P50))
+	fmt.Fprintf(out, "  P90:             %s\n", utils.FormatDuration(summary.P90))
 	fmt.Fprintf(out, "  P95:             %s\n", utils.FormatDuration(summary.P95))
 	fmt.Fprintf(out, "  P99:             %s\n", utils.FormatDuration(summary.P99))
+	fmt.Fprintf(out, "  P99.9:           %s\n", utils.FormatDuration(summary.P999))
 	fmt.Fprintf(out, "  Max:             %s\n", utils.FormatDuration(summary.MaxLatency))
 	fmt.Fprintln(out, subDivider)
 

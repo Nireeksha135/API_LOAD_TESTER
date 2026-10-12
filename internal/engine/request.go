@@ -3,19 +3,28 @@ package engine
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 )
 
 type requestTemplate struct {
-	method      string
-	url         string
-	headers     map[string]string
-	contentType string
-	bodyBytes   []byte
+	method             string
+	urls               []string
+	headers            map[string]string
+	contentType        string
+	bodyBytes          []byte
+	dynamicURL         bool
+	dynamicHeaders     bool
+	dynamicContentType bool
+	dynamicBody        bool
+	needsCounter       bool
+	needsRandom        bool
 }
 
 func newRequestTemplate(cfg *config.Config) *requestTemplate {
@@ -29,27 +38,86 @@ func newRequestTemplate(cfg *config.Config) *requestTemplate {
 		bodyBytes = []byte(cfg.Body)
 	}
 
-	return &requestTemplate{
+	template := &requestTemplate{
 		method:      cfg.Method,
-		url:         cfg.TargetURL,
+		urls:        append([]string(nil), cfg.TargetURLs...),
 		headers:     headers,
 		contentType: cfg.ContentType,
 		bodyBytes:   bodyBytes,
 	}
+	if len(template.urls) == 0 {
+		template.urls = []string{cfg.TargetURL}
+	}
+	for _, targetURL := range template.urls {
+		template.dynamicURL = template.dynamicURL || strings.Contains(targetURL, "{{")
+		template.needsCounter = template.needsCounter || strings.Contains(targetURL, "{{counter}}")
+		template.needsRandom = template.needsRandom || strings.Contains(targetURL, "{{random}}")
+	}
+	template.dynamicBody = strings.Contains(cfg.Body, "{{")
+	template.needsCounter = template.needsCounter || strings.Contains(cfg.Body, "{{counter}}")
+	template.needsRandom = template.needsRandom || strings.Contains(cfg.Body, "{{random}}")
+	template.dynamicContentType = strings.Contains(cfg.ContentType, "{{")
+	template.needsCounter = template.needsCounter || strings.Contains(cfg.ContentType, "{{counter}}")
+	template.needsRandom = template.needsRandom || strings.Contains(cfg.ContentType, "{{random}}")
+	for _, value := range template.headers {
+		template.dynamicHeaders = template.dynamicHeaders || strings.Contains(value, "{{")
+		template.needsCounter = template.needsCounter || strings.Contains(value, "{{counter}}")
+		template.needsRandom = template.needsRandom || strings.Contains(value, "{{random}}")
+	}
+	return template
 }
 
-func (t *requestTemplate) newRequest(ctx context.Context) (*http.Request, error) {
-	var bodyReader io.Reader
-	if len(t.bodyBytes) > 0 {
-		bodyReader = bytes.NewReader(t.bodyBytes)
+func (t *requestTemplate) needsRequestID() bool {
+	return len(t.urls) > 1 || t.needsCounter
+}
+
+func (t *requestTemplate) newRequest(ctx context.Context, counter uint64) (*http.Request, error) {
+	if counter == 0 {
+		counter = 1
+	}
+	counterValue := ""
+	if t.needsCounter {
+		counterValue = strconv.FormatUint(counter, 10)
+	}
+	targetURL := t.urls[(counter-1)%uint64(len(t.urls))]
+	bodyBytes := t.bodyBytes
+	contentType := t.contentType
+	var randomValue string
+	if t.needsRandom {
+		var randomBytes [16]byte
+		if _, err := rand.Read(randomBytes[:]); err != nil {
+			return nil, err
+		}
+		randomValue = hex.EncodeToString(randomBytes[:])
+	}
+	replace := func(value string) string {
+		value = strings.ReplaceAll(value, "{{counter}}", counterValue)
+		return strings.ReplaceAll(value, "{{random}}", randomValue)
+	}
+	if t.dynamicURL {
+		targetURL = replace(targetURL)
+	}
+	if t.dynamicBody {
+		bodyBytes = []byte(replace(string(bodyBytes)))
+	}
+	if t.dynamicContentType {
+		contentType = replace(contentType)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, t.method, t.url, bodyReader)
+	var bodyReader io.Reader
+	if len(bodyBytes) > 0 {
+		bodyReader = bytes.NewReader(bodyBytes)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, t.method, targetURL, bodyReader)
 	if err != nil {
 		return nil, err
 	}
 
 	for k, v := range t.headers {
+		if t.dynamicHeaders {
+			v = replace(v)
+		}
 		if strings.EqualFold(k, "Host") {
 			req.Host = v
 		} else {
@@ -57,12 +125,12 @@ func (t *requestTemplate) newRequest(ctx context.Context) (*http.Request, error)
 		}
 	}
 
-	if t.contentType != "" && req.Header.Get("Content-Type") == "" {
-		req.Header.Set("Content-Type", t.contentType)
+	if contentType != "" && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 
-	if len(t.bodyBytes) > 0 {
-		bodyLen := len(t.bodyBytes)
+	if len(bodyBytes) > 0 {
+		bodyLen := len(bodyBytes)
 		req.ContentLength = int64(bodyLen)
 	}
 

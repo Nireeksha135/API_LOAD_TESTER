@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/engine"
@@ -13,6 +14,14 @@ import (
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/reporter"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/utils"
 )
+
+type ThresholdError struct {
+	Failures []string
+}
+
+func (e *ThresholdError) Error() string {
+	return "thresholds failed: " + strings.Join(e.Failures, "; ")
+}
 
 func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.File) error {
 	if cfg == nil {
@@ -28,6 +37,9 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 	var collectorOpts []metrics.Option
 	if cfg.OutputCSV != "" {
 		collectorOpts = append(collectorOpts, metrics.WithRawResults())
+	}
+	if cfg.OutputJSON != "" || cfg.OutputTimeSeriesCSV != "" {
+		collectorOpts = append(collectorOpts, metrics.WithTimeSeries())
 	}
 	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency, collectorOpts...)
 
@@ -81,6 +93,45 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 		}
 		fmt.Fprintf(stdout, "JSON summary written to %s\n", cfg.OutputJSON)
 	}
+	if cfg.OutputTimeSeriesCSV != "" {
+		if err := exporter.ExportTimeSeriesCSV(cfg.OutputTimeSeriesCSV, summary.TimeSeries); err != nil {
+			return fmt.Errorf("cli: failed to export time series CSV: %w", err)
+		}
+		fmt.Fprintf(stdout, "Time series CSV written to %s\n", cfg.OutputTimeSeriesCSV)
+	}
+
+	failures := checkThresholds(summary, cfg)
+	if len(failures) > 0 {
+		fmt.Fprintln(stdout, "Thresholds failed:")
+		for _, failure := range failures {
+			fmt.Fprintf(stdout, "  - %s\n", failure)
+		}
+		return &ThresholdError{Failures: failures}
+	}
+	if cfg.MaxP95 != nil || cfg.MaxErrorRate != nil {
+		fmt.Fprintln(stdout, "Thresholds passed")
+	}
 
 	return nil
+}
+
+func checkThresholds(summary models.Summary, cfg *config.Config) []string {
+	var failures []string
+	if cfg.MaxP95 != nil && summary.P95 > *cfg.MaxP95 {
+		failures = append(failures, fmt.Sprintf("P95 %s exceeds maximum %s", summary.P95, *cfg.MaxP95))
+	}
+	if cfg.MaxErrorRate != nil {
+		var errorRate float64
+		denominator := summary.ScheduledRequests
+		if denominator == 0 {
+			denominator = summary.TotalRequests
+		}
+		if denominator > 0 {
+			errorRate = float64(summary.FailedRequests+summary.DroppedRequests) / float64(denominator)
+		}
+		if errorRate > *cfg.MaxErrorRate {
+			failures = append(failures, fmt.Sprintf("error rate %.2f%% exceeds maximum %.2f%%", errorRate*100, *cfg.MaxErrorRate*100))
+		}
+	}
+	return failures
 }

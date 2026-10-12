@@ -14,26 +14,42 @@ import (
 // marshals to JSON as an opaque integer nanosecond count that is easy
 // to misread without units.
 type jsonSummary struct {
-	TargetURL                string           `json:"target_url"`
-	Method                   string           `json:"method"`
-	StartTime                string           `json:"start_time"`
-	EndTime                  string           `json:"end_time"`
-	TotalDurationMS          float64          `json:"total_duration_ms"`
-	Concurrency              int              `json:"concurrency"`
-	TotalRequests            int64            `json:"total_requests"`
-	SuccessRequests          int64            `json:"success_requests"`
-	FailedRequests           int64            `json:"failed_requests"`
-	StatusCodeCounts         map[string]int64 `json:"status_code_counts"`
-	MinLatencyMS             float64          `json:"min_latency_ms"`
-	MaxLatencyMS             float64          `json:"max_latency_ms"`
-	MeanLatencyMS            float64          `json:"mean_latency_ms"`
-	P50LatencyMS             float64          `json:"p50_latency_ms"`
-	P95LatencyMS             float64          `json:"p95_latency_ms"`
-	P99LatencyMS             float64          `json:"p99_latency_ms"`
-	RequestsPerSecond        float64          `json:"requests_per_second"`
-	TotalBytesRead           int64            `json:"total_bytes_read"`
-	ThroughputBytesPerSecond float64          `json:"throughput_bytes_per_second"`
-	Errors                   map[string]int64 `json:"errors,omitempty"`
+	TargetURL                string                `json:"target_url"`
+	Method                   string                `json:"method"`
+	StartTime                string                `json:"start_time"`
+	EndTime                  string                `json:"end_time"`
+	TotalDurationNS          int64                 `json:"total_duration_ns"`
+	TotalDurationHuman       string                `json:"total_duration_human"`
+	TotalDurationMS          float64               `json:"total_duration_ms"`
+	Concurrency              int                   `json:"concurrency"`
+	TotalRequests            int64                 `json:"total_requests"`
+	ScheduledRequests        int64                 `json:"scheduled_requests"`
+	DroppedRequests          int64                 `json:"dropped_requests"`
+	TargetRPS                float64               `json:"target_rps,omitempty"`
+	SuccessRequests          int64                 `json:"success_requests"`
+	FailedRequests           int64                 `json:"failed_requests"`
+	StatusCodeCounts         map[string]int64      `json:"status_code_counts"`
+	MinLatencyMS             float64               `json:"min_latency_ms"`
+	MaxLatencyMS             float64               `json:"max_latency_ms"`
+	MeanLatencyMS            float64               `json:"mean_latency_ms"`
+	P50LatencyMS             float64               `json:"p50_latency_ms"`
+	P90LatencyMS             float64               `json:"p90_latency_ms"`
+	P95LatencyMS             float64               `json:"p95_latency_ms"`
+	P99LatencyMS             float64               `json:"p99_latency_ms"`
+	P999LatencyMS            float64               `json:"p999_latency_ms"`
+	RequestsPerSecond        float64               `json:"requests_per_second"`
+	TotalBytesRead           int64                 `json:"total_bytes_read"`
+	ThroughputBytesPerSecond float64               `json:"throughput_bytes_per_second"`
+	Errors                   map[string]int64      `json:"errors,omitempty"`
+	TimeSeries               []jsonTimeSeriesPoint `json:"time_series,omitempty"`
+}
+
+type jsonTimeSeriesPoint struct {
+	Second       int64   `json:"second"`
+	Requests     int64   `json:"requests"`
+	RPS          float64 `json:"rps"`
+	P95LatencyMS float64 `json:"p95_latency_ms"`
+	Errors       int64   `json:"errors"`
 }
 
 // ExportJSON marshals the aggregated models.Summary to indented JSON
@@ -48,14 +64,30 @@ func ExportJSON(path string, summary models.Summary) error {
 		statusCodeCounts[key] = count
 	}
 
+	timeSeries := make([]jsonTimeSeriesPoint, len(summary.TimeSeries))
+	for i, point := range summary.TimeSeries {
+		timeSeries[i] = jsonTimeSeriesPoint{
+			Second:       point.Second,
+			Requests:     point.Requests,
+			RPS:          point.RPS,
+			P95LatencyMS: durationToMS(point.P95),
+			Errors:       point.Errors,
+		}
+	}
+
 	out := jsonSummary{
 		TargetURL:                summary.TargetURL,
 		Method:                   summary.Method,
 		StartTime:                summary.StartTime.Format("2006-01-02T15:04:05.000Z07:00"),
 		EndTime:                  summary.EndTime.Format("2006-01-02T15:04:05.000Z07:00"),
+		TotalDurationNS:          summary.TotalDuration.Nanoseconds(),
+		TotalDurationHuman:       summary.TotalDuration.String(),
 		TotalDurationMS:          durationToMS(summary.TotalDuration),
 		Concurrency:              summary.Concurrency,
 		TotalRequests:            summary.TotalRequests,
+		ScheduledRequests:        summary.ScheduledRequests,
+		DroppedRequests:          summary.DroppedRequests,
+		TargetRPS:                summary.TargetRPS,
 		SuccessRequests:          summary.SuccessRequests,
 		FailedRequests:           summary.FailedRequests,
 		StatusCodeCounts:         statusCodeCounts,
@@ -63,12 +95,15 @@ func ExportJSON(path string, summary models.Summary) error {
 		MaxLatencyMS:             durationToMS(summary.MaxLatency),
 		MeanLatencyMS:            durationToMS(summary.MeanLatency),
 		P50LatencyMS:             durationToMS(summary.P50),
+		P90LatencyMS:             durationToMS(summary.P90),
 		P95LatencyMS:             durationToMS(summary.P95),
 		P99LatencyMS:             durationToMS(summary.P99),
+		P999LatencyMS:            durationToMS(summary.P999),
 		RequestsPerSecond:        summary.RequestsPerSecond,
 		TotalBytesRead:           summary.TotalBytesRead,
 		ThroughputBytesPerSecond: summary.ThroughputBytesPerSecond,
 		Errors:                   summary.Errors,
+		TimeSeries:               timeSeries,
 	}
 
 	data, err := json.MarshalIndent(out, "", "  ")

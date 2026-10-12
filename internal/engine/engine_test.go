@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -99,6 +101,192 @@ func TestEngineRunDurationMode(t *testing.T) {
 	}
 }
 
+func TestEngineRateModeSchedulesIndependentlyOfResponseTime(t *testing.T) {
+	arrivals := make(chan time.Time, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrivals <- time.Now()
+		time.Sleep(500 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := newTestConfig(server.URL)
+	cfg.TotalRequests = 4
+	cfg.Concurrency = 4
+	cfg.RPS = 10
+	cfg.Timeout = 2 * time.Second
+	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency)
+	eng, err := New(cfg, collector, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	summary, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if summary.ScheduledRequests != 4 || summary.TotalRequests != 4 || summary.DroppedRequests != 0 {
+		t.Errorf("scheduled=%d actual=%d dropped=%d, want 4/4/0", summary.ScheduledRequests, summary.TotalRequests, summary.DroppedRequests)
+	}
+	first := <-arrivals
+	last := first
+	for i := 1; i < 4; i++ {
+		arrival := <-arrivals
+		if arrival.Before(first) {
+			first = arrival
+		}
+		if arrival.After(last) {
+			last = arrival
+		}
+	}
+	span := last.Sub(first)
+	if span < 150*time.Millisecond || span > 800*time.Millisecond {
+		t.Errorf("request start span = %v, want approximately 300ms despite 500ms responses", span)
+	}
+}
+
+func TestRateIntervalClampsExtremeRates(t *testing.T) {
+	if got := rateInterval(1e9); got != time.Nanosecond {
+		t.Errorf("rateInterval(1e9) = %v, want 1ns", got)
+	}
+	if got := rateInterval(1e-300); got != time.Duration(1<<63-1) {
+		t.Errorf("rateInterval(1e-300) = %v, want maximum time.Duration", got)
+	}
+}
+
+func TestEngineRateModeCountsDroppedArrivals(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(250 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := newTestConfig(server.URL)
+	cfg.TotalRequests = 10
+	cfg.Concurrency = 1
+	cfg.RPS = 20
+	cfg.Timeout = time.Second
+	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency)
+	eng, err := New(cfg, collector, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	summary, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if summary.ScheduledRequests != 10 {
+		t.Errorf("ScheduledRequests = %d, want 10", summary.ScheduledRequests)
+	}
+	if summary.DroppedRequests == 0 {
+		t.Error("DroppedRequests = 0, want saturation to be visible")
+	}
+	if summary.TotalRequests+summary.DroppedRequests != summary.ScheduledRequests {
+		t.Errorf("actual + dropped = %d, want scheduled %d", summary.TotalRequests+summary.DroppedRequests, summary.ScheduledRequests)
+	}
+}
+
+func TestEngineWarmupRequestsAreNotMeasured(t *testing.T) {
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := newTestConfig(server.URL)
+	cfg.TotalRequests = 1
+	cfg.Concurrency = 1
+	cfg.Warmup = 50 * time.Millisecond
+	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency)
+	eng, err := New(cfg, collector, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	summary, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if summary.TotalRequests != 1 {
+		t.Errorf("measured TotalRequests = %d, want 1", summary.TotalRequests)
+	}
+	if got := atomic.LoadInt32(&requests); got <= 1 {
+		t.Errorf("server saw %d requests, want warm-up requests plus one measured request", got)
+	}
+}
+
+func TestEngineDurationStartsAfterWarmup(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := newTestConfig(server.URL)
+	cfg.UseDuration = true
+	cfg.Duration = 100 * time.Millisecond
+	cfg.Warmup = 100 * time.Millisecond
+	cfg.Concurrency = 1
+	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency)
+	eng, err := New(cfg, collector, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	start := time.Now()
+	summary, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < 180*time.Millisecond {
+		t.Errorf("Run() elapsed = %v, want warmup plus measured duration", elapsed)
+	}
+	if summary.TotalDuration < 80*time.Millisecond {
+		t.Errorf("measured duration = %v, want the full duration after warmup", summary.TotalDuration)
+	}
+}
+
+func TestEngineRampUpStaggersClosedLoopWorkers(t *testing.T) {
+	arrivals := make(chan time.Time, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrivals <- time.Now()
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := newTestConfig(server.URL)
+	cfg.TotalRequests = 3
+	cfg.Concurrency = 3
+	cfg.RampUp = 120 * time.Millisecond
+	cfg.Timeout = time.Second
+	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency)
+	eng, err := New(cfg, collector, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := eng.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	first := <-arrivals
+	last := first
+	for i := 1; i < 3; i++ {
+		arrival := <-arrivals
+		if arrival.Before(first) {
+			first = arrival
+		}
+		if arrival.After(last) {
+			last = arrival
+		}
+	}
+	span := last.Sub(first)
+	if span < 80*time.Millisecond || span > 500*time.Millisecond {
+		t.Errorf("request start span = %v, want staggered starts across ramp-up", span)
+	}
+}
+
 func TestEngineRunPostWithBody(t *testing.T) {
 	var receivedBodies int32
 
@@ -172,6 +360,62 @@ func TestEngineRunUsesHostHeader(t *testing.T) {
 	}
 	if summary.SuccessRequests != 1 {
 		t.Errorf("SuccessRequests = %d, want 1", summary.SuccessRequests)
+	}
+}
+
+func TestEngineSubstitutesRequestTokensAndRotatesURLs(t *testing.T) {
+	var mu sync.Mutex
+	paths := make(map[string]int)
+	randomValues := make(map[string]struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(r.URL.Path, "/")
+		if len(parts) != 3 {
+			t.Errorf("request path = %q, want /<target>/<counter>", r.URL.Path)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		counter := parts[2]
+		randomValue := r.Header.Get("X-Nonce")
+		if r.Header.Get("X-Counter") != counter {
+			t.Errorf("X-Counter = %q, want %q", r.Header.Get("X-Counter"), counter)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		if !strings.Contains(string(body), "id="+counter) || !strings.Contains(string(body), "nonce="+randomValue) {
+			t.Errorf("request body = %q, want counter and random token substitutions", body)
+		}
+		if len(randomValue) != 32 {
+			t.Errorf("X-Nonce length = %d, want 32 hex characters", len(randomValue))
+		}
+		mu.Lock()
+		paths[parts[1]]++
+		randomValues[randomValue] = struct{}{}
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := newTestConfig(server.URL + "/a/{{counter}}")
+	cfg.TargetURLs = []string{server.URL + "/a/{{counter}}", server.URL + "/b/{{counter}}"}
+	cfg.TotalRequests = 4
+	cfg.Concurrency = 2
+	cfg.Body = "id={{counter}}&nonce={{random}}"
+	cfg.Headers = map[string]string{"X-Counter": "{{counter}}", "X-Nonce": "{{random}}"}
+	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency)
+	eng, err := New(cfg, collector, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := eng.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if paths["a"] != 2 || paths["b"] != 2 {
+		t.Errorf("target distribution = %v, want two requests to each target", paths)
+	}
+	if len(randomValues) != 4 {
+		t.Errorf("generated %d distinct random values, want 4", len(randomValues))
 	}
 }
 

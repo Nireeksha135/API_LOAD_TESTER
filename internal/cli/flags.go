@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 )
@@ -24,6 +25,17 @@ func (h *headerFlags) Set(value string) error {
 	return nil
 }
 
+type stringFlags []string
+
+func (s *stringFlags) String() string {
+	return strings.Join(*s, ",")
+}
+
+func (s *stringFlags) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
+
 type Options struct {
 	Config *config.Config
 
@@ -32,34 +44,61 @@ type Options struct {
 }
 
 func ParseArgs(args []string, errOut io.Writer) (*Options, error) {
+	configPath, args, err := extractConfigPath(args)
+	if err != nil {
+		return nil, err
+	}
+	defaults := config.NewDefaultConfig()
+	if configPath != "" {
+		defaults, err = config.LoadYAML(configPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	fs := flag.NewFlagSet("api-load-tester", flag.ContinueOnError)
 	fs.SetOutput(errOut)
+	fs.String("config", configPath, "Path to YAML configuration file")
 
-	defaults := config.NewDefaultConfig()
+	maxP95Default := ""
+	if defaults.MaxP95 != nil {
+		maxP95Default = defaults.MaxP95.String()
+	}
+	maxErrorRateDefault := ""
+	if defaults.MaxErrorRate != nil {
+		maxErrorRateDefault = fmt.Sprintf("%g", *defaults.MaxErrorRate)
+	}
 
 	var (
-		targetURL   = fs.String("url", "", "Target URL to load test (required)")
 		method      = fs.String("method", defaults.Method, "HTTP method: GET, POST, PUT, DELETE, PATCH, HEAD")
-		body        = fs.String("body", "", "Request body, typically JSON (sent with POST/PUT/PATCH/DELETE)")
+		body        = fs.String("body", defaults.Body, "Request body, typically JSON (sent with POST/PUT/PATCH/DELETE)")
 		bodyFile    = fs.String("body-file", "", "Path to a file containing the request body; overrides -body if set")
-		contentType = fs.String("content-type", "", "Content-Type header; defaults to application/json when -body is set and no Content-Type header is given via -H")
+		contentType = fs.String("content-type", defaults.ContentType, "Content-Type header; defaults to application/json when -body is set and no Content-Type header is given via -H")
 
 		concurrency = fs.Int("c", defaults.Concurrency, "Number of concurrent workers")
 		requests    = fs.Int("n", defaults.TotalRequests, "Total number of requests to send (ignored if -d is set)")
-		duration    = fs.Duration("d", 0, "Run for a fixed duration instead of a fixed request count, e.g. 30s, 2m")
+		duration    = fs.Duration("d", defaults.Duration, "Run for a fixed duration instead of a fixed request count, e.g. 30s, 2m")
+		rps         = fs.Float64("rps", defaults.RPS, "Open-loop target request arrival rate (0 disables rate scheduling)")
+		warmup      = fs.Duration("warmup", defaults.Warmup, "Unmeasured warm-up duration before the test")
+		rampUp      = fs.Duration("ramp-up", defaults.RampUp, "Time to ramp workers or arrival rate up to target")
 
 		timeout             = fs.Duration("timeout", defaults.Timeout, "Per-request timeout")
-		insecureSkipVerify  = fs.Bool("insecure", false, "Skip TLS certificate verification")
-		disableKeepAlives   = fs.Bool("disable-keep-alives", false, "Disable HTTP keep-alives (force a new connection per request)")
+		maxP95              = fs.String("max-p95", maxP95Default, "Fail if P95 latency exceeds this duration, e.g. 200ms")
+		maxErrorRate        = fs.String("max-error-rate", maxErrorRateDefault, "Fail if error rate exceeds this fraction or percentage, e.g. 0.01 or 1%")
+		insecureSkipVerify  = fs.Bool("insecure", defaults.InsecureSkipVerify, "Skip TLS certificate verification")
+		disableKeepAlives   = fs.Bool("disable-keep-alives", defaults.DisableKeepAlives, "Disable HTTP keep-alives (force a new connection per request)")
 		maxIdleConnsPerHost = fs.Int("max-idle-conns", defaults.MaxIdleConnsPerHost, "Max idle connections kept open per host")
 
-		outputCSV  = fs.String("csv", "", "Path to write a per-request CSV report")
-		outputJSON = fs.String("json", "", "Path to write the aggregated JSON summary report")
+		outputCSV     = fs.String("csv", defaults.OutputCSV, "Path to write a per-request CSV report")
+		outputJSON    = fs.String("json", defaults.OutputJSON, "Path to write the aggregated JSON summary report")
+		timeSeriesCSV = fs.String("time-series-csv", defaults.OutputTimeSeriesCSV, "Path to write per-second RPS, P95, and error counts")
 
-		verbose     = fs.Bool("v", false, "Verbose per-request logging to stderr")
+		verbose     = fs.Bool("v", defaults.Verbose, "Verbose per-request logging to stderr")
 		showVersion = fs.Bool("version", false, "Print version and exit")
 	)
 
+	var targetURLs stringFlags
+	fs.Var(&targetURLs, "url", "Target URL to load test; repeat to distribute requests round-robin")
 	var headers headerFlags
 	fs.Var(&headers, "H", "Custom header \"Key: Value\" (repeatable)")
 
@@ -79,19 +118,43 @@ func ParseArgs(args []string, errOut io.Writer) (*Options, error) {
 		return opts, nil
 	}
 
-	cfg := config.NewDefaultConfig()
-	cfg.TargetURL = strings.TrimSpace(*targetURL)
+	cfg := defaults
+	if len(targetURLs) > 0 {
+		cfg.TargetURLs = append([]string(nil), targetURLs...)
+		for i := range cfg.TargetURLs {
+			cfg.TargetURLs[i] = strings.TrimSpace(cfg.TargetURLs[i])
+		}
+		cfg.TargetURL = cfg.TargetURLs[0]
+	}
 	cfg.Method = strings.ToUpper(strings.TrimSpace(*method))
 	cfg.Body = *body
 	cfg.ContentType = strings.TrimSpace(*contentType)
 	cfg.Concurrency = *concurrency
 	cfg.TotalRequests = *requests
+	cfg.RPS = *rps
+	cfg.Warmup = *warmup
+	cfg.RampUp = *rampUp
 	cfg.Timeout = *timeout
+	if raw := strings.TrimSpace(*maxP95); raw != "" {
+		limit, err := time.ParseDuration(raw)
+		if err != nil {
+			return nil, fmt.Errorf("cli: invalid -max-p95 %q: %w", raw, err)
+		}
+		cfg.MaxP95 = &limit
+	}
+	if raw := strings.TrimSpace(*maxErrorRate); raw != "" {
+		limit, err := config.ParseErrorRate(raw)
+		if err != nil {
+			return nil, fmt.Errorf("cli: invalid -max-error-rate %q: %w", raw, err)
+		}
+		cfg.MaxErrorRate = &limit
+	}
 	cfg.InsecureSkipVerify = *insecureSkipVerify
 	cfg.DisableKeepAlives = *disableKeepAlives
 	cfg.MaxIdleConnsPerHost = *maxIdleConnsPerHost
 	cfg.OutputCSV = strings.TrimSpace(*outputCSV)
 	cfg.OutputJSON = strings.TrimSpace(*outputJSON)
+	cfg.OutputTimeSeriesCSV = strings.TrimSpace(*timeSeriesCSV)
 	cfg.Verbose = *verbose
 
 	if *duration > 0 {
@@ -111,7 +174,12 @@ func ParseArgs(args []string, errOut io.Writer) (*Options, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg.Headers = parsedHeaders
+	if cfg.Headers == nil {
+		cfg.Headers = make(map[string]string)
+	}
+	for key, value := range parsedHeaders {
+		cfg.Headers[key] = value
+	}
 
 	if cfg.ContentType == "" && cfg.Body != "" && cfg.Headers["Content-Type"] == "" {
 		cfg.ContentType = "application/json"
@@ -123,6 +191,37 @@ func ParseArgs(args []string, errOut io.Writer) (*Options, error) {
 
 	opts.Config = cfg
 	return opts, nil
+}
+
+func extractConfigPath(args []string) (string, []string, error) {
+	var configPath string
+	remaining := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-config" || arg == "--config" {
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+				return "", nil, fmt.Errorf("cli: -config requires a file path")
+			}
+			if configPath != "" {
+				return "", nil, fmt.Errorf("cli: -config may only be specified once")
+			}
+			configPath = args[i+1]
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "-config=") || strings.HasPrefix(arg, "--config=") {
+			if configPath != "" {
+				return "", nil, fmt.Errorf("cli: -config may only be specified once")
+			}
+			configPath = strings.SplitN(arg, "=", 2)[1]
+			if configPath == "" {
+				return "", nil, fmt.Errorf("cli: -config requires a file path")
+			}
+			continue
+		}
+		remaining = append(remaining, arg)
+	}
+	return configPath, remaining, nil
 }
 
 const usageText = `api-load-tester - a concurrent HTTP API load testing tool

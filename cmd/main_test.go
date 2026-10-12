@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 )
@@ -32,5 +34,26 @@ func TestMainWithExitCodeInvalidArguments(t *testing.T) {
 
 	if got := mainWithExitCode(); got != 1 {
 		t.Errorf("mainWithExitCode() = %d, want 1", got)
+	}
+}
+
+func TestMainWithExitCodeThresholdFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	originalArgs := os.Args
+	os.Args = []string{
+		"api-load-tester",
+		"-url", server.URL,
+		"-n", "1",
+		"-c", "1",
+		"-max-error-rate", "0%",
+	}
+	t.Cleanup(func() { os.Args = originalArgs })
+
+	if got := mainWithExitCode(); got != 1 {
+		t.Errorf("mainWithExitCode() = %d, want 1 when a threshold fails", got)
 	}
 }

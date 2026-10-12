@@ -27,13 +27,18 @@ The project focuses on **concurrency, worker pools, HTTP networking, thread-safe
 - Worker pool architecture
 - Fixed request count mode
 - Fixed duration mode
+- Open-loop target RPS with dropped-arrival accounting
+- Unmeasured warm-up and gradual ramp-up
+- Per-second RPS, P95 and error time series
+- Round-robin URL targets and per-request counter/random tokens
+- YAML configuration files
 - Custom HTTP headers
 - JSON and raw request bodies
 - Per-request latency tracking
 - Bounded-memory HDR histogram percentiles
 - Error counts grouped by message
 - Min / Max / Mean latency
-- P50 / P95 / P99 percentiles
+- P50 / P90 / P95 / P99 / P99.9 percentiles
 - Requests Per Second (RPS)
 - Throughput measurement
 - HTTP status code breakdown
@@ -115,6 +120,61 @@ api-load-tester \
   -c 100 \
   -d 30s
 ```
+
+### CI Thresholds
+
+Threshold failures leave the final report and requested exports available, then exit with status 1. Error rates accept a fraction or percentage.
+
+```bash
+api-load-tester -url https://api.example.com/health -n 1000 -c 50 \
+    -max-p95 200ms -max-error-rate 1% -json summary.json
+```
+
+### Arrival Rate and Ramp
+
+`-rps` schedules arrivals independently of request completion. `-c` caps in-flight requests; when all workers are occupied, arrivals are counted as dropped and included in the error-rate threshold.
+
+```bash
+api-load-tester -url https://api.example.com/health -d 30s -c 100 \
+    -rps 200 -warmup 5s -ramp-up 10s -json summary.json \
+    -time-series-csv seconds.csv
+```
+
+### Dynamic Requests
+
+Repeated `-url` values are selected round-robin. The `{{counter}}` and `{{random}}` tokens are expanded independently for each request in URLs, bodies, and headers.
+
+```bash
+api-load-tester \
+    -url 'https://api.example.com/orders/{{counter}}' \
+    -url 'https://api.example.com/items/{{counter}}' \
+    -body '{"request":"{{counter}}","id":"{{random}}"}' -n 100
+```
+
+### YAML Configuration
+
+CLI flags override values loaded from `-config`.
+
+```yaml
+urls:
+    - https://api.example.com/orders/{{counter}}
+    - https://api.example.com/items/{{counter}}
+method: POST
+body: '{"request":"{{counter}}","id":"{{random}}"}'
+concurrency: 50
+requests: 1000
+rps: 200
+warmup: 5s
+ramp-up: 10s
+max-p95: 200ms
+max-error-rate: 1%
+```
+
+```bash
+api-load-tester -config load-test.yaml -c 100 -json summary.json
+```
+
+JSON reports include numeric nanosecond/millisecond duration values and a readable `total_duration_human` string. Use `-time-series-csv` for a separate per-second CSV alongside the per-request `-csv` export.
 
 ---
 

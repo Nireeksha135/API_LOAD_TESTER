@@ -25,6 +25,13 @@ func WithRawResults() Option {
 	}
 }
 
+// WithTimeSeries enables compact per-second metrics retention.
+func WithTimeSeries() Option {
+	return func(c *Collector) {
+		c.keepTimeSeries = true
+	}
+}
+
 type Collector struct {
 	mu sync.Mutex
 
@@ -49,8 +56,10 @@ type Collector struct {
 	errorCounts      map[string]int64
 	workers          []*Collector
 
-	keepRaw    bool
-	rawResults []models.RequestResult
+	keepRaw        bool
+	rawResults     []models.RequestResult
+	keepTimeSeries bool
+	timeSeries     map[int64]*secondBucket
 }
 
 // NewCollector creates a new Collector for a run against targetURL using the given HTTP method and concurrency level.
@@ -70,6 +79,9 @@ func NewCollector(targetURL, method string, concurrency int, opts ...Option) *Co
 
 	if c.keepRaw {
 		c.rawResults = make([]models.RequestResult, 0, 1024)
+	}
+	if c.keepTimeSeries {
+		c.timeSeries = make(map[int64]*secondBucket)
 	}
 
 	return c
@@ -99,11 +111,15 @@ func (c *Collector) NewWorkerCollectors(count int) []*Collector {
 
 	workers := make([]*Collector, count)
 	for i := range workers {
-		worker := NewCollector(c.targetURL, c.method, c.concurrency)
+		var opts []Option
 		if c.keepRaw {
-			worker.keepRaw = true
-			worker.rawResults = make([]models.RequestResult, 0, 1024)
+			opts = append(opts, WithRawResults())
 		}
+		if c.keepTimeSeries {
+			opts = append(opts, WithTimeSeries())
+		}
+		worker := NewCollector(c.targetURL, c.method, c.concurrency, opts...)
+		worker.startTime = c.startTime
 		workers[i] = worker
 	}
 	c.workers = append(c.workers, workers...)
@@ -151,6 +167,19 @@ func (c *Collector) Record(result models.RequestResult) {
 	if c.keepRaw {
 		c.rawResults = append(c.rawResults, result)
 	}
+	if c.keepTimeSeries {
+		elapsed := result.Timestamp.Sub(c.startTime)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		second := int64(elapsed / time.Second)
+		bucket := c.timeSeries[second]
+		if bucket == nil {
+			bucket = &secondBucket{}
+			c.timeSeries[second] = bucket
+		}
+		bucket.record(result)
+	}
 }
 
 func (c *Collector) TotalRequestsSoFar() int64 {
@@ -187,6 +216,7 @@ type aggregate struct {
 	statusCodeCounts map[int]int64
 	errorCounts      map[string]int64
 	latencies        *hdrhistogram.Histogram
+	timeSeries       map[int64]*secondBucket
 }
 
 func (c *Collector) aggregateLocked(includeHistogram bool) aggregate {
@@ -196,6 +226,9 @@ func (c *Collector) aggregateLocked(includeHistogram bool) aggregate {
 	}
 	if includeHistogram {
 		a.latencies = hdrhistogram.New(1, maxLatencyNanoseconds, 3)
+		if c.keepTimeSeries {
+			a.timeSeries = make(map[int64]*secondBucket)
+		}
 	}
 	a.addCollectorLocked(c, includeHistogram)
 	for _, worker := range c.workers {
@@ -228,6 +261,14 @@ func (a *aggregate) addCollectorLocked(c *Collector, includeHistogram bool) {
 	}
 	if includeHistogram {
 		a.latencies.Merge(c.latencies)
+		for second, source := range c.timeSeries {
+			target := a.timeSeries[second]
+			if target == nil {
+				target = &secondBucket{}
+				a.timeSeries[second] = target
+			}
+			target.merge(source)
+		}
 	}
 }
 
@@ -318,6 +359,7 @@ func (c *Collector) Summary() models.Summary {
 		requestsPerSecond = float64(data.totalRequests) / seconds
 		throughputBytesPerSecond = float64(data.totalBytesRead) / seconds
 	}
+	timeSeries := data.timeSeriesPoints(totalDuration)
 
 	return models.Summary{
 		TargetURL:                c.targetURL,
@@ -334,11 +376,14 @@ func (c *Collector) Summary() models.Summary {
 		MaxLatency:               data.maxLatency,
 		MeanLatency:              meanLatency,
 		P50:                      time.Duration(data.latencies.ValueAtQuantile(50)),
+		P90:                      time.Duration(data.latencies.ValueAtQuantile(90)),
 		P95:                      time.Duration(data.latencies.ValueAtQuantile(95)),
 		P99:                      time.Duration(data.latencies.ValueAtQuantile(99)),
+		P999:                     time.Duration(data.latencies.ValueAtQuantile(99.9)),
 		RequestsPerSecond:        requestsPerSecond,
 		TotalBytesRead:           data.totalBytesRead,
 		ThroughputBytesPerSecond: throughputBytesPerSecond,
 		Errors:                   data.errorCounts,
+		TimeSeries:               timeSeries,
 	}
 }

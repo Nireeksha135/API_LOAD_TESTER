@@ -29,12 +29,17 @@ func TestExportJSON(t *testing.T) {
 		MaxLatency:               500 * time.Millisecond,
 		MeanLatency:              60 * time.Millisecond,
 		P50:                      50 * time.Millisecond,
+		P90:                      120 * time.Millisecond,
 		P95:                      180 * time.Millisecond,
 		P99:                      400 * time.Millisecond,
+		P999:                     450 * time.Millisecond,
 		RequestsPerSecond:        200,
 		TotalBytesRead:           2048000,
 		ThroughputBytesPerSecond: 204800,
 		Errors:                   map[string]int64{"timeout": 4},
+		TimeSeries: []models.TimeSeriesPoint{{
+			Second: 1, Requests: 200, RPS: 200, P95: 120 * time.Millisecond, Errors: 3,
+		}},
 	}
 
 	if err := ExportJSON(path, summary); err != nil {
@@ -57,8 +62,18 @@ func TestExportJSON(t *testing.T) {
 	if parsed["total_requests"].(float64) != 2000 {
 		t.Errorf("total_requests = %v, want 2000", parsed["total_requests"])
 	}
+	if parsed["total_duration_ns"].(float64) != float64(10*time.Second) || parsed["total_duration_human"] != "10s" {
+		t.Errorf("total duration JSON fields = %v / %v, want 10000000000 / 10s", parsed["total_duration_ns"], parsed["total_duration_human"])
+	}
+	if parsed["p90_latency_ms"].(float64) != 120 || parsed["p999_latency_ms"].(float64) != 450 {
+		t.Errorf("additional percentiles = P90:%v P99.9:%v, want 120/450ms", parsed["p90_latency_ms"], parsed["p999_latency_ms"])
+	}
 	if parsed["p99_latency_ms"].(float64) != 400 {
 		t.Errorf("p99_latency_ms = %v, want 400", parsed["p99_latency_ms"])
+	}
+	series, ok := parsed["time_series"].([]interface{})
+	if !ok || len(series) != 1 || series[0].(map[string]interface{})["p95_latency_ms"] != float64(120) {
+		t.Errorf("time_series = %v, want per-second P95 of 120ms", parsed["time_series"])
 	}
 
 	statusCodes, ok := parsed["status_code_counts"].(map[string]interface{})

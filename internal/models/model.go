@@ -68,6 +68,15 @@ type Summary struct {
 	// TotalRequests is the total number of requests attempted.
 	TotalRequests int64 `json:"total_requests"`
 
+	// ScheduledRequests is the number of arrivals requested by the rate scheduler.
+	ScheduledRequests int64 `json:"scheduled_requests"`
+
+	// DroppedRequests is the number of scheduled arrivals that exceeded worker capacity.
+	DroppedRequests int64 `json:"dropped_requests"`
+
+	// TargetRPS is the requested open-loop arrival rate, or zero in closed-loop mode.
+	TargetRPS float64 `json:"target_rps,omitempty"`
+
 	// SuccessRequests is the number of requests that completed with
 	// a non-error transport result and an HTTP status code < 400.
 	SuccessRequests int64 `json:"success_requests"`
@@ -93,11 +102,17 @@ type Summary struct {
 	// P50 is the 50th percentile (median) latency.
 	P50 time.Duration `json:"p50_latency_ns"`
 
+	// P90 is the 90th percentile latency.
+	P90 time.Duration `json:"p90_latency_ns"`
+
 	// P95 is the 95th percentile latency.
 	P95 time.Duration `json:"p95_latency_ns"`
 
 	// P99 is the 99th percentile latency.
 	P99 time.Duration `json:"p99_latency_ns"`
+
+	// P999 is the 99.9th percentile latency.
+	P999 time.Duration `json:"p999_latency_ns"`
 
 	// RequestsPerSecond is the average throughput in requests/sec
 	// computed as TotalRequests / TotalDuration.Seconds().
@@ -112,6 +127,17 @@ type Summary struct {
 
 	// Errors maps each distinct error message to its occurrence count.
 	Errors map[string]int64 `json:"errors,omitempty"`
+
+	// TimeSeries contains per-second throughput, latency, and error points when enabled.
+	TimeSeries []TimeSeriesPoint `json:"time_series,omitempty"`
+}
+
+type TimeSeriesPoint struct {
+	Second   int64         `json:"second"`
+	Requests int64         `json:"requests"`
+	RPS      float64       `json:"rps"`
+	P95      time.Duration `json:"p95_latency_ns"`
+	Errors   int64         `json:"errors"`
 }
 
 // LatencySample is a lightweight structure used internally by the

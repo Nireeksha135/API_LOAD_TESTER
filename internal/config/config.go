@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -35,6 +36,9 @@ type Config struct {
 	// TargetURL is the fully-qualified URL to send requests to.
 	TargetURL string
 
+	// TargetURLs is an optional list of URLs selected round-robin per request.
+	TargetURLs []string
+
 	// Method is the HTTP method to use (GET, POST, PUT, DELETE, ...).
 	Method string
 
@@ -53,6 +57,9 @@ type Config struct {
 	// issue requests simultaneously.
 	Concurrency int
 
+	// RPS is the optional target arrival rate. Zero preserves closed-loop mode.
+	RPS float64
+
 	// TotalRequests is the total number of requests to issue across
 	// all workers. Ignored when UseDuration is true.
 	TotalRequests int
@@ -61,6 +68,12 @@ type Config struct {
 	// is true. Ignored otherwise.
 	Duration time.Duration
 
+	// Warmup is an optional unmeasured traffic period before the test.
+	Warmup time.Duration
+
+	// RampUp is the period over which workers or request rate are increased.
+	RampUp time.Duration
+
 	// UseDuration selects duration-based load testing (run for a fixed
 	// amount of time) instead of a fixed request count.
 	UseDuration bool
@@ -68,9 +81,18 @@ type Config struct {
 	// Timeout is the per-request HTTP client timeout.
 	Timeout time.Duration
 
+	// MaxP95 is the optional maximum accepted P95 latency.
+	MaxP95 *time.Duration
+
+	// MaxErrorRate is the optional maximum accepted failure fraction.
+	MaxErrorRate *float64
+
 	// OutputCSV, if non-empty, is the file path to export a CSV report
 	// of every individual request result.
 	OutputCSV string
+
+	// OutputTimeSeriesCSV is the optional file path for per-second metrics.
+	OutputTimeSeriesCSV string
 
 	// OutputJSON, if non-empty, is the file path to export the final
 	// aggregated JSON summary report.
@@ -116,20 +138,32 @@ func (c *Config) Validate() error {
 		return errors.New("config: config is nil")
 	}
 
-	if strings.TrimSpace(c.TargetURL) == "" {
+	targetURLs := c.TargetURLs
+	if len(targetURLs) == 0 {
+		targetURLs = []string{c.TargetURL}
+	}
+	if len(targetURLs) == 0 || strings.TrimSpace(targetURLs[0]) == "" {
 		return errors.New("config: target URL must not be empty")
 	}
-
-	parsed, err := url.ParseRequestURI(c.TargetURL)
-	if err != nil {
-		return fmt.Errorf("config: invalid target URL %q: %w", c.TargetURL, err)
+	validatedURLs := make([]string, len(targetURLs))
+	for i, targetURL := range targetURLs {
+		targetURL = strings.TrimSpace(targetURL)
+		parsed, err := url.ParseRequestURI(targetURL)
+		if err != nil {
+			return fmt.Errorf("config: invalid target URL %q: %w", targetURL, err)
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return fmt.Errorf("config: target URL scheme must be http or https, got %q", parsed.Scheme)
+		}
+		if parsed.Host == "" {
+			return fmt.Errorf("config: target URL %q must include a host", targetURL)
+		}
+		validatedURLs[i] = targetURL
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("config: target URL scheme must be http or https, got %q", parsed.Scheme)
+	if len(c.TargetURLs) > 0 {
+		c.TargetURLs = validatedURLs
 	}
-	if parsed.Host == "" {
-		return fmt.Errorf("config: target URL %q must include a host", c.TargetURL)
-	}
+	c.TargetURL = validatedURLs[0]
 
 	method := strings.ToUpper(strings.TrimSpace(c.Method))
 	if method == "" {
@@ -142,6 +176,9 @@ func (c *Config) Validate() error {
 
 	if c.Concurrency <= 0 {
 		return fmt.Errorf("config: concurrency must be greater than 0, got %d", c.Concurrency)
+	}
+	if math.IsNaN(c.RPS) || math.IsInf(c.RPS, 0) || c.RPS < 0 || c.RPS > 1e9 {
+		return fmt.Errorf("config: RPS must be between 0 and 1e9, got %g", c.RPS)
 	}
 
 	if c.UseDuration {
@@ -159,6 +196,15 @@ func (c *Config) Validate() error {
 
 	if c.Timeout <= 0 {
 		return fmt.Errorf("config: timeout must be greater than 0, got %s", c.Timeout)
+	}
+	if c.Warmup < 0 || c.RampUp < 0 {
+		return errors.New("config: warmup and ramp-up durations must not be negative")
+	}
+	if c.MaxP95 != nil && *c.MaxP95 < 0 {
+		return fmt.Errorf("config: max P95 latency must not be negative, got %s", *c.MaxP95)
+	}
+	if c.MaxErrorRate != nil && (math.IsNaN(*c.MaxErrorRate) || math.IsInf(*c.MaxErrorRate, 0) || *c.MaxErrorRate < 0 || *c.MaxErrorRate > 1) {
+		return fmt.Errorf("config: max error rate must be between 0 and 1, got %g", *c.MaxErrorRate)
 	}
 
 	if c.MaxIdleConnsPerHost <= 0 {

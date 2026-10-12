@@ -160,6 +160,37 @@ func TestCollectorCountsEveryError(t *testing.T) {
 	}
 }
 
+func TestCollectorMergesPerSecondTimeSeries(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 2, WithTimeSeries())
+	c.Start()
+	workers := c.NewWorkerCollectors(2)
+	start := time.Now()
+	workers[0].Record(models.RequestResult{
+		StatusCode: 200,
+		Latency:    25 * time.Millisecond,
+		Timestamp:  start.Add(10 * time.Millisecond),
+		Success:    true,
+	})
+	workers[1].Record(models.RequestResult{
+		StatusCode: 500,
+		Latency:    100 * time.Millisecond,
+		Timestamp:  start.Add(20 * time.Millisecond),
+		Success:    false,
+	})
+	c.Stop()
+
+	series := c.Summary().TimeSeries
+	if len(series) == 0 {
+		t.Fatal("TimeSeries is empty, want at least the first-second bucket")
+	}
+	if series[0].Second != 0 || series[0].Requests != 2 || series[0].Errors != 1 {
+		t.Errorf("first time-series point = %+v, want second 0 with 2 requests and 1 error", series[0])
+	}
+	if series[0].P95 < 100*time.Millisecond || series[0].P95 > 130*time.Millisecond {
+		t.Errorf("per-second P95 = %v, want approximately 100ms", series[0].P95)
+	}
+}
+
 func TestCollectorConcurrentRecord(t *testing.T) {
 	c := NewCollector("http://example.com", "GET", 10)
 	c.Start()

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
+	"sync/atomic"
 
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/metrics"
@@ -13,12 +13,13 @@ import (
 )
 
 type Engine struct {
-	cfg       *config.Config
-	client    *http.Client
-	template  *requestTemplate
-	collector *metrics.Collector
-	logger    *log.Logger
-	verbose   bool
+	cfg            *config.Config
+	client         *http.Client
+	template       *requestTemplate
+	collector      *metrics.Collector
+	logger         *log.Logger
+	verbose        bool
+	requestCounter atomic.Uint64
 }
 
 func New(cfg *config.Config, collector *metrics.Collector, logger *log.Logger) (*Engine, error) {
@@ -52,13 +53,15 @@ func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 		return models.Summary{}, fmt.Errorf("engine: Run called on nil Engine")
 	}
 
+	if e.cfg.Warmup > 0 {
+		e.runWarmup(ctx)
+	}
 	runCtx := ctx
 	var cancel context.CancelFunc
 	if e.cfg.UseDuration {
 		runCtx, cancel = context.WithTimeout(ctx, e.cfg.Duration)
 		defer cancel()
 	}
-
 	e.collector.Start()
 
 	var remainingPtr *int64
@@ -67,17 +70,27 @@ func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 		remainingPtr = &remaining
 	}
 
-	var wg sync.WaitGroup
 	workerCollectors := e.collector.NewWorkerCollectors(e.cfg.Concurrency)
-	wg.Add(e.cfg.Concurrency)
-	for i := 0; i < e.cfg.Concurrency; i++ {
-		go e.runWorker(runCtx, i, remainingPtr, &wg, workerCollectors[i])
+	var scheduledRequests, droppedRequests int64
+	if e.cfg.RPS > 0 {
+		countLimit := int64(-1)
+		if !e.cfg.UseDuration {
+			countLimit = int64(e.cfg.TotalRequests)
+		}
+		scheduledRequests, droppedRequests = e.runRateWorkers(runCtx, workerCollectors, countLimit)
+	} else {
+		e.runWorkers(runCtx, remainingPtr, workerCollectors, true)
 	}
-
-	wg.Wait()
 	e.collector.Stop()
 
-	return e.collector.Summary(), nil
+	summary := e.collector.Summary()
+	if e.cfg.RPS == 0 {
+		scheduledRequests = summary.TotalRequests
+	}
+	summary.ScheduledRequests = scheduledRequests
+	summary.DroppedRequests = droppedRequests
+	summary.TargetRPS = e.cfg.RPS
+	return summary, nil
 }
 
 // Config returns the Engine's underlying Config.
