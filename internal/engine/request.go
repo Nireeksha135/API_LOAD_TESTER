@@ -3,9 +3,10 @@ package engine
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"io"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -85,9 +86,8 @@ func (t *requestTemplate) newRequest(ctx context.Context, counter uint64) (*http
 	var randomValue string
 	if t.needsRandom {
 		var randomBytes [16]byte
-		if _, err := rand.Read(randomBytes[:]); err != nil {
-			return nil, err
-		}
+		binary.LittleEndian.PutUint64(randomBytes[:8], rand.Uint64())
+		binary.LittleEndian.PutUint64(randomBytes[8:], rand.Uint64())
 		randomValue = hex.EncodeToString(randomBytes[:])
 	}
 	replace := func(value string) string {

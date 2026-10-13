@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -102,6 +103,38 @@ func TestParseArgsDurationMode(t *testing.T) {
 	}
 	if opts.Config.Duration != 15*time.Second {
 		t.Errorf("Duration = %v, want 15s", opts.Config.Duration)
+	}
+}
+
+func TestParseArgsCountModeOverridesYAMLDuration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "duration.yaml")
+	if err := os.WriteFile(path, []byte("url: https://api.example.com\nduration: 30s\nrequests: 25\n"), 0o644); err != nil {
+		t.Fatalf("write YAML: %v", err)
+	}
+
+	var errOut bytes.Buffer
+	opts, err := ParseArgs([]string{"-config", path, "-n", "15"}, &errOut)
+	if err != nil {
+		t.Fatalf("ParseArgs() error = %v", err)
+	}
+	if opts.Config.UseDuration {
+		t.Error("UseDuration = true, want count mode when -n overrides YAML duration")
+	}
+	if opts.Config.TotalRequests != 15 {
+		t.Errorf("TotalRequests = %d, want CLI override 15", opts.Config.TotalRequests)
+	}
+}
+
+func TestUsageListsNewFlags(t *testing.T) {
+	var errOut bytes.Buffer
+	_, err := ParseArgs([]string{"-h"}, &errOut)
+	if err == nil {
+		t.Fatal("ParseArgs(-h) error = nil, want help exit")
+	}
+	for _, flag := range []string{"-rps", "-warmup", "-ramp-up", "-max-p95", "-max-error-rate", "-time-series-csv"} {
+		if !strings.Contains(errOut.String(), flag) {
+			t.Errorf("usage output missing %s", flag)
+		}
 	}
 }
 
@@ -458,6 +491,22 @@ func TestRunEndToEndWithExports(t *testing.T) {
 
 	if _, err := os.Stat(csvPath); err != nil {
 		t.Errorf("expected CSV file at %s, got error: %v", csvPath, err)
+	} else {
+		file, err := os.Open(csvPath)
+		if err != nil {
+			t.Fatalf("open CSV report: %v", err)
+		}
+		rows, readErr := csv.NewReader(file).ReadAll()
+		closeErr := file.Close()
+		if readErr != nil {
+			t.Fatalf("read CSV report: %v", readErr)
+		}
+		if closeErr != nil {
+			t.Fatalf("close CSV report: %v", closeErr)
+		}
+		if len(rows) != 11 {
+			t.Errorf("CSV rows = %d, want header plus 10 request rows", len(rows))
+		}
 	}
 	if _, err := os.Stat(jsonPath); err != nil {
 		t.Errorf("expected JSON file at %s, got error: %v", jsonPath, err)

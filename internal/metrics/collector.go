@@ -18,7 +18,14 @@ const maxLatencyNanoseconds int64 = 1<<63 - 1
 
 type Option func(*Collector)
 
-// WithRawResults enables retention of every individual RequestResult in memory
+// WithResultObserver registers a callback invoked synchronously for each recorded request.
+func WithResultObserver(observer func(models.RequestResult) error) Option {
+	return func(c *Collector) {
+		c.resultObserver = observer
+	}
+}
+
+// WithRawResults enables retention of every individual RequestResult in memory.
 func WithRawResults() Option {
 	return func(c *Collector) {
 		c.keepRaw = true
@@ -54,6 +61,8 @@ type Collector struct {
 	statusCodeCounts map[int]int64
 	latencies        *hdrhistogram.Histogram
 	errorCounts      map[string]int64
+	resultObserver   func(models.RequestResult) error
+	recordingErr     error
 	workers          []*Collector
 
 	keepRaw    bool
@@ -83,7 +92,6 @@ func NewCollector(targetURL, method string, concurrency int, opts ...Option) *Co
 }
 
 // Start records the wall-clock start time of the load test run.
-
 func (c *Collector) Start() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -91,7 +99,6 @@ func (c *Collector) Start() {
 }
 
 // Stop records the wall-clock end time of the load test run.
-
 func (c *Collector) Stop() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -109,6 +116,9 @@ func (c *Collector) NewWorkerCollectors(count int) []*Collector {
 		var opts []Option
 		if c.keepRaw {
 			opts = append(opts, WithRawResults())
+		}
+		if c.resultObserver != nil {
+			opts = append(opts, WithResultObserver(c.resultObserver))
 		}
 		worker := NewCollector(c.targetURL, c.method, c.concurrency, opts...)
 		worker.startTime = c.startTime
@@ -168,6 +178,27 @@ func (c *Collector) Record(result models.RequestResult) {
 		second := int64(elapsed / time.Second)
 		c.timeSeries.record(second, result)
 	}
+	if c.resultObserver != nil && c.recordingErr == nil {
+		c.recordingErr = c.resultObserver(result)
+	}
+}
+
+// RecordingError returns the first error produced by a result observer.
+func (c *Collector) RecordingError() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.recordingErr != nil {
+		return c.recordingErr
+	}
+	for _, worker := range c.workers {
+		worker.mu.Lock()
+		err := worker.recordingErr
+		worker.mu.Unlock()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Collector) TotalRequestsSoFar() int64 {

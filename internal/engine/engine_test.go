@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -214,6 +215,47 @@ func TestEngineWarmupRequestsAreNotMeasured(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&requests); got <= 1 {
 		t.Errorf("server saw %d requests, want warm-up requests plus one measured request", got)
+	}
+}
+
+func TestEngineWarmupCounterRestartsAtOne(t *testing.T) {
+	type request struct {
+		counter string
+	}
+	var mu sync.Mutex
+	var received []request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		received = append(received, request{counter: strings.TrimPrefix(r.URL.Path, "/")})
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := newTestConfig(server.URL + "/{{counter}}")
+	cfg.TotalRequests = 3
+	cfg.Concurrency = 1
+	cfg.Warmup = 30 * time.Millisecond
+	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency)
+	eng, err := New(cfg, collector, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := eng.Run(context.Background()); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) < 3 {
+		t.Fatalf("server received %d requests, want warm-up plus 3 measured requests", len(received))
+	}
+	measured := received[len(received)-3:]
+	for i, item := range measured {
+		counter := item.counter
+		if counter != strconv.Itoa(i+1) {
+			t.Errorf("measured counter[%d] = %q, want %q", i, counter, strconv.Itoa(i+1))
+		}
 	}
 }
 

@@ -176,6 +176,19 @@ func TestCollectorCountsEveryError(t *testing.T) {
 	}
 }
 
+func TestCollectorReportsResultObserverErrors(t *testing.T) {
+	wantErr := errors.New("CSV write failed")
+	c := NewCollector("http://example.com", "GET", 1, WithResultObserver(func(models.RequestResult) error {
+		return wantErr
+	}))
+	workers := c.NewWorkerCollectors(1)
+	workers[0].Record(models.RequestResult{StatusCode: 200, Latency: time.Millisecond, Success: true})
+
+	if err := c.RecordingError(); !errors.Is(err, wantErr) {
+		t.Errorf("RecordingError() = %v, want %v", err, wantErr)
+	}
+}
+
 func TestCollectorMergesPerSecondTimeSeries(t *testing.T) {
 	c := NewCollector("http://example.com", "GET", 2, WithTimeSeries())
 	c.Start()

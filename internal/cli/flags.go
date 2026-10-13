@@ -1,4 +1,5 @@
-// Package cli parses command-line arguments into a validated
+// Package cli parses command-line arguments into validated load-test configuration
+// and coordinates execution, reporting, and threshold evaluation.
 package cli
 
 import (
@@ -111,6 +112,16 @@ func ParseArgs(args []string, errOut io.Writer) (*Options, error) {
 		return nil, err
 	}
 
+	var requestsFlagSet, durationFlagSet bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "n":
+			requestsFlagSet = true
+		case "d":
+			durationFlagSet = true
+		}
+	})
+
 	opts := &Options{}
 
 	if *showVersion {
@@ -157,9 +168,11 @@ func ParseArgs(args []string, errOut io.Writer) (*Options, error) {
 	cfg.OutputTimeSeriesCSV = strings.TrimSpace(*timeSeriesCSV)
 	cfg.Verbose = *verbose
 
-	if *duration > 0 {
+	if durationFlagSet && *duration > 0 {
 		cfg.UseDuration = true
 		cfg.Duration = *duration
+	} else if requestsFlagSet || durationFlagSet {
+		cfg.UseDuration = false
 	}
 
 	if strings.TrimSpace(*bodyFile) != "" {
@@ -233,6 +246,9 @@ EXAMPLES:
   # 1000 GET requests, 50 concurrent workers
   api-load-tester -url https://api.example.com/health -c 50 -n 1000
 
+  # Run at a target arrival rate; excess arrivals are counted as dropped
+  api-load-tester -url https://api.example.com/health -d 30s -rps 200 -c 100
+
   # POST with a JSON body and custom headers, run for 30 seconds
   api-load-tester -url https://api.example.com/users -method POST \
       -body '{"name":"load-test"}' -H "Authorization: Bearer TOKEN" \
@@ -241,5 +257,8 @@ EXAMPLES:
   # Export both a per-request CSV and an aggregated JSON summary
   api-load-tester -url https://api.example.com/health -n 5000 -c 200 \
       -csv results.csv -json summary.json
+
+  # Key options: -rps, -warmup, -ramp-up, -max-p95, -max-error-rate,
+  #              -csv, -json, -time-series-csv, -config, -version
 
 FLAGS:`

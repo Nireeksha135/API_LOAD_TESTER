@@ -46,8 +46,7 @@ func New(cfg *config.Config, collector *metrics.Collector, logger *log.Logger) (
 	}, nil
 }
 
-// Run executes the load test to completion
-
+// Run executes the load test to completion.
 func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 	if e == nil {
 		return models.Summary{}, fmt.Errorf("engine: Run called on nil Engine")
@@ -55,6 +54,7 @@ func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 
 	if e.cfg.Warmup > 0 {
 		e.runWarmup(ctx)
+		e.requestCounter.Store(0)
 	}
 	runCtx := ctx
 	var cancel context.CancelFunc
@@ -90,11 +90,13 @@ func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 	summary.ScheduledRequests = scheduledRequests
 	summary.DroppedRequests = droppedRequests
 	summary.TargetRPS = e.cfg.RPS
+	if err := e.collector.RecordingError(); err != nil {
+		return summary, fmt.Errorf("engine: failed to record request result: %w", err)
+	}
 	return summary, nil
 }
 
 // Config returns the Engine's underlying Config.
-
 func (e *Engine) Config() *config.Config {
 	return e.cfg
 }

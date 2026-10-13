@@ -70,7 +70,7 @@ Performance Analysis
 Terminal / CSV / JSON
 ```
 
-Each worker records results in its own collector. Live dashboard snapshots aggregate those collectors, and the final summary merges their counters and HDR histograms. The shared per-second time series avoids duplicating latency bins for every worker. Summary percentiles use a two-significant-digit HDR histogram across the full supported latency range.
+Each worker records results in its own collector. Live dashboard snapshots aggregate those collectors, and the final summary merges their counters and HDR histograms. The shared per-second time series avoids duplicating latency bins for every worker. Summary percentiles use a two-significant-digit HDR histogram across the full supported latency range. The per-second time-series P95 is approximate: it uses coarse latency bins and reports each bin's upper edge, so it can read up to about 25% higher than the underlying latency.
 
 ---
 
@@ -142,7 +142,7 @@ api-load-tester -url https://api.example.com/health -d 30s -c 100 \
 
 ### Dynamic Requests
 
-Repeated `-url` values are selected round-robin. The `{{counter}}` and `{{random}}` tokens are expanded independently for each request in URLs, bodies, and headers.
+Repeated `-url` values are selected round-robin. The `{{counter}}` and `{{random}}` tokens are expanded independently for each request in URLs, bodies, and headers. Warm-up sends real requests, but its counter values are reset before measurement, so measured requests start at `1`.
 
 ```bash
 api-load-tester \
@@ -153,7 +153,7 @@ api-load-tester \
 
 ### YAML Configuration
 
-CLI flags override values loaded from `-config`.
+CLI flags override values loaded from `-config`. Use `-n` to switch a YAML duration-mode test back to request-count mode; a positive CLI `-d` selects duration mode.
 
 ```yaml
 urls:
@@ -174,7 +174,7 @@ max-error-rate: 1%
 api-load-tester -config load-test.yaml -c 100 -json summary.json
 ```
 
-JSON reports include numeric nanosecond/millisecond duration values and a readable `total_duration_human` string. Use `-time-series-csv` for a separate per-second CSV alongside the per-request `-csv` export.
+JSON reports include numeric nanosecond/millisecond duration values and a readable `total_duration_human` string. The JSON `errors` field is an object mapping error messages to occurrence counts; older report versions used an array, so consumers that expect that prior shape must be updated. Use `-time-series-csv` for a separate per-second CSV alongside the per-request `-csv` export.
 
 ---
 

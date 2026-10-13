@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -99,6 +100,53 @@ func TestExportCSVEmptyResults(t *testing.T) {
 	}
 	if len(rows) != 1 {
 		t.Errorf("len(rows) = %d, want 1 (header only)", len(rows))
+	}
+}
+
+func TestCSVWriterConcurrentResults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "concurrent.csv")
+	writer, err := NewCSVWriter(path)
+	if err != nil {
+		t.Fatalf("NewCSVWriter() error = %v", err)
+	}
+
+	const count = 100
+	var wg sync.WaitGroup
+	errs := make(chan error, count)
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs <- writer.Write(models.RequestResult{
+				StatusCode: 200,
+				Timestamp:  time.Now(),
+				Success:    true,
+				WorkerID:   i,
+			})
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("CSVWriter.Write() error = %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("CSVWriter.Close() error = %v", err)
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open CSV: %v", err)
+	}
+	defer file.Close()
+	rows, err := csv.NewReader(file).ReadAll()
+	if err != nil {
+		t.Fatalf("read CSV: %v", err)
+	}
+	if len(rows) != count+1 {
+		t.Errorf("CSV rows = %d, want %d", len(rows), count+1)
 	}
 }
 

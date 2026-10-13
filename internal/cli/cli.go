@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -34,9 +35,12 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 		stderr = os.Stderr
 	}
 
+	var csvWriter *exporter.CSVWriter
 	var collectorOpts []metrics.Option
 	if cfg.OutputCSV != "" {
-		collectorOpts = append(collectorOpts, metrics.WithRawResults())
+		collectorOpts = append(collectorOpts, metrics.WithResultObserver(func(result models.RequestResult) error {
+			return csvWriter.Write(result)
+		}))
 	}
 	if cfg.OutputJSON != "" || cfg.OutputTimeSeriesCSV != "" {
 		collectorOpts = append(collectorOpts, metrics.WithTimeSeries())
@@ -51,6 +55,12 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 	eng, err := engine.New(cfg, collector, logger)
 	if err != nil {
 		return fmt.Errorf("cli: failed to initialize engine: %w", err)
+	}
+	if cfg.OutputCSV != "" {
+		csvWriter, err = exporter.NewCSVWriter(cfg.OutputCSV)
+		if err != nil {
+			return fmt.Errorf("cli: failed to initialize CSV export: %w", err)
+		}
 	}
 
 	type runResult struct {
@@ -72,8 +82,15 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 	dash.Run(dashCtx)
 
 	result := <-resultCh
+	var csvCloseErr error
+	if csvWriter != nil {
+		csvCloseErr = csvWriter.Close()
+	}
 	if result.err != nil {
-		return fmt.Errorf("cli: load test run failed: %w", result.err)
+		return fmt.Errorf("cli: load test run failed: %w", errors.Join(result.err, csvCloseErr))
+	}
+	if csvCloseErr != nil {
+		return fmt.Errorf("cli: failed to finalize CSV export: %w", csvCloseErr)
 	}
 
 	summary := result.summary
@@ -81,9 +98,6 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 	reporter.PrintSummary(stdout, summary)
 
 	if cfg.OutputCSV != "" {
-		if err := exporter.ExportCSV(cfg.OutputCSV, collector.RawResults()); err != nil {
-			return fmt.Errorf("cli: failed to export CSV: %w", err)
-		}
 		fmt.Fprintf(stdout, "CSV report written to %s\n", cfg.OutputCSV)
 	}
 
