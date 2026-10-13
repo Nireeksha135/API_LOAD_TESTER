@@ -45,11 +45,13 @@ func PrintSummary(out io.Writer, summary models.Summary) {
 	fmt.Fprintf(out, "Throughput:        %s/s\n", utils.FormatBytes(int64(summary.ThroughputBytesPerSecond)))
 	if summary.TargetRPS > 0 {
 		var scheduledRPS, targetRatio float64
-		if summary.TotalDuration > 0 {
-			scheduledRPS = float64(summary.ScheduledRequests) / summary.TotalDuration.Seconds()
-			targetRatio = scheduledRPS / summary.TargetRPS * 100
+		if summary.ScheduleDuration > 0 {
+			scheduledRPS = float64(summary.ScheduledRequests) / summary.ScheduleDuration.Seconds()
 		}
-		fmt.Fprintf(out, "Scheduled RPS:     %.2f (%.1f%% of target)\n", scheduledRPS, targetRatio)
+		if summary.ExpectedScheduledRequests > 0 {
+			targetRatio = float64(summary.ScheduledRequests) / float64(summary.ExpectedScheduledRequests) * 100
+		}
+		fmt.Fprintf(out, "Scheduled RPS:     %.2f (%.1f%% of scheduled target)\n", scheduledRPS, targetRatio)
 	}
 	fmt.Fprintln(out, subDivider)
 

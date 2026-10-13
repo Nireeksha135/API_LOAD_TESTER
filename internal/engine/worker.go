@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -127,25 +128,13 @@ func (e *Engine) runWarmup(ctx context.Context) {
 	e.runWorkers(warmupCtx, nil, workerCollectors, false)
 }
 
-func (e *Engine) runRateWorkers(ctx context.Context, collectors []*metrics.Collector, countLimit int64) (scheduled, dropped int64) {
+func (e *Engine) runRateWorkers(ctx context.Context, collectors []*metrics.Collector, countLimit int64) (scheduled, dropped int64, scheduleDuration time.Duration) {
 	jobs := make(chan int, len(collectors))
 	for workerID := range collectors {
 		jobs <- workerID
 	}
 
 	started := time.Now()
-	intervalFor := func(elapsed time.Duration) time.Duration {
-		rate := e.cfg.RPS
-		if e.cfg.RampUp > 0 && elapsed < e.cfg.RampUp {
-			fraction := float64(elapsed) / float64(e.cfg.RampUp)
-			minimumFraction := 1 / float64(e.cfg.Concurrency+1)
-			if fraction < minimumFraction {
-				fraction = minimumFraction
-			}
-			rate *= fraction
-		}
-		return rateInterval(rate)
-	}
 
 	var wg sync.WaitGroup
 	startRequest := func() {
@@ -166,10 +155,7 @@ func (e *Engine) runRateWorkers(ctx context.Context, collectors []*metrics.Colle
 	if e.cfg.RampUp == 0 && ctx.Err() == nil && (countLimit < 0 || countLimit > 0) {
 		startRequest()
 	}
-	nextArrival := started.Add(intervalFor(0))
-	if e.cfg.RampUp == 0 && scheduled > 0 {
-		nextArrival = started.Add(rateInterval(e.cfg.RPS))
-	}
+	nextArrival := started.Add(arrivalOffset(scheduled+1, e.cfg.RPS, e.cfg.RampUp, e.cfg.Concurrency))
 	timer := time.NewTimer(time.Until(nextArrival))
 	defer timer.Stop()
 	for (countLimit < 0 || scheduled < countLimit) && ctx.Err() == nil {
@@ -184,8 +170,7 @@ func (e *Engine) runRateWorkers(ctx context.Context, collectors []*metrics.Colle
 				ctx.Err() == nil {
 				startRequest()
 				catchUp++
-				elapsed := nextArrival.Sub(started)
-				nextArrival = nextArrival.Add(intervalFor(elapsed))
+				nextArrival = started.Add(arrivalOffset(scheduled+1, e.cfg.RPS, e.cfg.RampUp, e.cfg.Concurrency))
 			}
 			if countLimit < 0 || scheduled < countLimit {
 				delay := time.Until(nextArrival)
@@ -197,21 +182,51 @@ func (e *Engine) runRateWorkers(ctx context.Context, collectors []*metrics.Colle
 		}
 	}
 done:
+	scheduleDuration = time.Since(started)
 	wg.Wait()
-	return scheduled, dropped
+	return scheduled, dropped, scheduleDuration
 }
 
-func rateInterval(rate float64) time.Duration {
+func arrivalOffset(ordinal int64, targetRPS float64, rampUp time.Duration, concurrency int) time.Duration {
+	if ordinal <= 0 {
+		return 0
+	}
+	area := float64(ordinal)
+	if rampUp <= 0 {
+		area = float64(ordinal - 1)
+		return durationFromSeconds(area / targetRPS)
+	}
+
+	rampSeconds := rampUp.Seconds()
+	minimumFraction := 1 / float64(concurrency+1)
+	minimumRampSeconds := rampSeconds * minimumFraction
+	minimumArea := targetRPS * rampSeconds * minimumFraction * minimumFraction
+	rampArea := targetRPS * rampSeconds * (1 + minimumFraction*minimumFraction) / 2
+
+	var seconds float64
+	switch {
+	case area <= minimumArea:
+		seconds = area / (targetRPS * minimumFraction)
+	case area <= rampArea:
+		seconds = math.Sqrt(minimumRampSeconds*minimumRampSeconds +
+			2*rampSeconds*(area-minimumArea)/targetRPS)
+	default:
+		seconds = rampSeconds + (area-rampArea)/targetRPS
+	}
+	return durationFromSeconds(seconds)
+}
+
+func durationFromSeconds(seconds float64) time.Duration {
 	const maxDuration = time.Duration(1<<63 - 1)
-	intervalNanos := float64(time.Second) / rate
-	if intervalNanos >= float64(maxDuration) {
+	nanoseconds := seconds * float64(time.Second)
+	if nanoseconds >= float64(maxDuration) {
 		return maxDuration
 	}
-	interval := time.Duration(intervalNanos)
-	if interval < time.Nanosecond {
-		return time.Nanosecond
+	duration := time.Duration(nanoseconds)
+	if duration < 0 {
+		return maxDuration
 	}
-	return interval
+	return duration
 }
 
 func (e *Engine) recordRequest(ctx context.Context, workerID int, collector *metrics.Collector) bool {

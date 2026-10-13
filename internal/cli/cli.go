@@ -86,6 +86,9 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 	if csvWriter != nil {
 		csvCloseErr = csvWriter.Close()
 	}
+	if result.err != nil {
+		return fmt.Errorf("cli: load test run failed: %w", errors.Join(result.err, csvCloseErr))
+	}
 	summary := result.summary
 
 	reporter.PrintSummary(stdout, summary)
@@ -126,9 +129,6 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 	}
 
 	var runErr error
-	if result.err != nil {
-		runErr = fmt.Errorf("cli: load test run failed: %w", result.err)
-	}
 	if csvCloseErr != nil {
 		runErr = errors.Join(runErr, fmt.Errorf("cli: failed to finalize CSV export: %w", csvCloseErr))
 	}

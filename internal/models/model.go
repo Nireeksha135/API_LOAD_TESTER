@@ -74,6 +74,12 @@ type Summary struct {
 	// DroppedRequests is the number of scheduled arrivals that exceeded worker capacity.
 	DroppedRequests int64 `json:"dropped_requests"`
 
+	// ExpectedScheduledRequests is the ideal arrival count for the scheduling window, including ramp-up.
+	ExpectedScheduledRequests int64 `json:"expected_scheduled_requests,omitempty"`
+
+	// ScheduleDuration is the time arrivals were being scheduled, excluding request drain time.
+	ScheduleDuration time.Duration `json:"-"`
+
 	// TargetRPS is the requested open-loop arrival rate, or zero in closed-loop mode.
 	TargetRPS float64 `json:"target_rps,omitempty"`
 

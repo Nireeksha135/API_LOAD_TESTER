@@ -145,12 +145,37 @@ func TestEngineRateModeSchedulesIndependentlyOfResponseTime(t *testing.T) {
 	}
 }
 
-func TestRateIntervalClampsExtremeRates(t *testing.T) {
-	if got := rateInterval(1e9); got != time.Nanosecond {
-		t.Errorf("rateInterval(1e9) = %v, want 1ns", got)
+func TestExpectedArrivalsAccountsForRampUp(t *testing.T) {
+	const (
+		targetRPS   = 100.0
+		rampUp      = 10 * time.Second
+		concurrency = 9
+	)
+	tests := []struct {
+		name     string
+		duration time.Duration
+		want     int64
+	}{
+		{name: "before ramp starts", duration: 500 * time.Millisecond, want: 5},
+		{name: "during ramp", duration: 5 * time.Second, want: 130},
+		{name: "after ramp", duration: 30 * time.Second, want: 2505},
 	}
-	if got := rateInterval(1e-300); got != time.Duration(1<<63-1) {
-		t.Errorf("rateInterval(1e-300) = %v, want maximum time.Duration", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := expectedArrivals(tt.duration, targetRPS, rampUp, concurrency); got != tt.want {
+				t.Errorf("expectedArrivals() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestArrivalOffsetFollowsRampIntegral(t *testing.T) {
+	for ordinal := int64(1); ordinal <= 10; ordinal++ {
+		offset := arrivalOffset(ordinal, 100, 10*time.Second, 9)
+		got := expectedArrivals(offset, 100, 10*time.Second, 9)
+		if got != ordinal {
+			t.Errorf("expected arrivals by offset %s = %d for ordinal %d", offset, got, ordinal)
+		}
 	}
 }
 
@@ -178,6 +203,12 @@ func TestEngineRateModeCountsDroppedArrivals(t *testing.T) {
 	}
 	if summary.ScheduledRequests != 10 {
 		t.Errorf("ScheduledRequests = %d, want 10", summary.ScheduledRequests)
+	}
+	if summary.ExpectedScheduledRequests > 10 {
+		t.Errorf("ExpectedScheduledRequests = %d, want count limited to 10", summary.ExpectedScheduledRequests)
+	}
+	if summary.ScheduleDuration <= 0 || summary.ScheduleDuration >= summary.TotalDuration {
+		t.Errorf("ScheduleDuration = %v, want positive duration shorter than request-drain-inclusive TotalDuration %v", summary.ScheduleDuration, summary.TotalDuration)
 	}
 	if summary.DroppedRequests == 0 {
 		t.Error("DroppedRequests = 0, want saturation to be visible")

@@ -15,28 +15,30 @@ func TestExportJSON(t *testing.T) {
 	path := filepath.Join(dir, "summary.json")
 
 	summary := models.Summary{
-		TargetURL:                "https://api.example.com",
-		Method:                   "POST",
-		StartTime:                time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC),
-		EndTime:                  time.Date(2026, 7, 7, 9, 0, 10, 0, time.UTC),
-		TotalDuration:            10 * time.Second,
-		Concurrency:              25,
-		TotalRequests:            2000,
-		SuccessRequests:          1950,
-		FailedRequests:           50,
-		StatusCodeCounts:         map[int]int64{201: 1950, 429: 45, 0: 5},
-		MinLatency:               2 * time.Millisecond,
-		MaxLatency:               500 * time.Millisecond,
-		MeanLatency:              60 * time.Millisecond,
-		P50:                      50 * time.Millisecond,
-		P90:                      120 * time.Millisecond,
-		P95:                      180 * time.Millisecond,
-		P99:                      400 * time.Millisecond,
-		P999:                     450 * time.Millisecond,
-		RequestsPerSecond:        200,
-		TotalBytesRead:           2048000,
-		ThroughputBytesPerSecond: 204800,
-		Errors:                   map[string]int64{"timeout": 4},
+		TargetURL:                 "https://api.example.com",
+		Method:                    "POST",
+		StartTime:                 time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC),
+		EndTime:                   time.Date(2026, 7, 7, 9, 0, 10, 0, time.UTC),
+		TotalDuration:             10 * time.Second,
+		Concurrency:               25,
+		TotalRequests:             2000,
+		ScheduledRequests:         2100,
+		ExpectedScheduledRequests: 2200,
+		SuccessRequests:           1950,
+		FailedRequests:            50,
+		StatusCodeCounts:          map[int]int64{201: 1950, 429: 45, 0: 5},
+		MinLatency:                2 * time.Millisecond,
+		MaxLatency:                500 * time.Millisecond,
+		MeanLatency:               60 * time.Millisecond,
+		P50:                       50 * time.Millisecond,
+		P90:                       120 * time.Millisecond,
+		P95:                       180 * time.Millisecond,
+		P99:                       400 * time.Millisecond,
+		P999:                      450 * time.Millisecond,
+		RequestsPerSecond:         200,
+		TotalBytesRead:            2048000,
+		ThroughputBytesPerSecond:  204800,
+		Errors:                    map[string]int64{"timeout": 4},
 		TimeSeries: []models.TimeSeriesPoint{{
 			Second: 1, Requests: 200, RPS: 200, P95: 120 * time.Millisecond, Errors: 3,
 		}},
@@ -61,6 +63,9 @@ func TestExportJSON(t *testing.T) {
 	}
 	if parsed["total_requests"].(float64) != 2000 {
 		t.Errorf("total_requests = %v, want 2000", parsed["total_requests"])
+	}
+	if parsed["expected_scheduled_requests"].(float64) != 2200 {
+		t.Errorf("expected_scheduled_requests = %v, want 2200", parsed["expected_scheduled_requests"])
 	}
 	if parsed["total_duration_ns"].(float64) != float64(10*time.Second) || parsed["total_duration_human"] != "10s" {
 		t.Errorf("total duration JSON fields = %v / %v, want 10000000000 / 10s", parsed["total_duration_ns"], parsed["total_duration_human"])

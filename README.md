@@ -132,7 +132,7 @@ api-load-tester -url https://api.example.com/health -n 1000 -c 50 \
 
 ### Arrival Rate and Ramp
 
-`-rps` schedules arrivals independently of request completion, using deadlines anchored to the scheduler start and catching up after late timer wakeups. Target RPS is capped at 100,000, and catch-up work is bounded per timer wake-up. `-c` caps in-flight requests; when all workers are occupied, arrivals are counted as dropped and included in the error-rate threshold. The final report shows scheduled arrivals per elapsed second and the percentage of target RPS achieved, alongside completed requests/sec.
+`-rps` schedules arrivals independently of request completion, using deadlines anchored to the scheduler start and catching up after late timer wakeups. Target RPS is capped at 100,000, and catch-up work is bounded per timer wake-up. `-c` caps in-flight requests; when all workers are occupied, arrivals are counted as dropped and included in the error-rate threshold. The final report shows scheduled arrivals per scheduling second and adherence to the expected arrival count (including ramp-up), alongside completed requests/sec. With `-csv`, results are queued to a single writer; if the disk is slower than the request rate, the bounded queue can fill and briefly apply backpressure to request workers.
 
 ```bash
 api-load-tester -url https://api.example.com/health -d 30s -c 100 \

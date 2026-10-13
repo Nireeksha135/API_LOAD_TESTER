@@ -79,7 +79,7 @@ func ParseArgs(args []string, errOut io.Writer) (*Options, error) {
 		concurrency = fs.Int("c", defaults.Concurrency, "Number of concurrent workers")
 		requests    = fs.Int("n", defaults.TotalRequests, "Total number of requests to send (ignored if -d is set)")
 		duration    = fs.Duration("d", defaults.Duration, "Run for a fixed duration instead of a fixed request count, e.g. 30s, 2m")
-		rps         = fs.Float64("rps", defaults.RPS, "Open-loop target request arrival rate (0 disables rate scheduling)")
+		rps         = fs.Float64("rps", defaults.RPS, "Open-loop target arrival rate, max 100000/s (0 disables rate scheduling)")
 		warmup      = fs.Duration("warmup", defaults.Warmup, "Unmeasured warm-up duration before the test")
 		rampUp      = fs.Duration("ramp-up", defaults.RampUp, "Time to ramp workers or arrival rate up to target")
 

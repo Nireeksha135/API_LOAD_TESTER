@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sync/atomic"
+	"time"
 
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/metrics"
@@ -72,12 +73,18 @@ func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 
 	workerCollectors := e.collector.NewWorkerCollectors(e.cfg.Concurrency)
 	var scheduledRequests, droppedRequests int64
+	var scheduleDuration time.Duration
+	expectedScheduledRequests := int64(0)
 	if e.cfg.RPS > 0 {
 		countLimit := int64(-1)
 		if !e.cfg.UseDuration {
 			countLimit = int64(e.cfg.TotalRequests)
 		}
-		scheduledRequests, droppedRequests = e.runRateWorkers(runCtx, workerCollectors, countLimit)
+		scheduledRequests, droppedRequests, scheduleDuration = e.runRateWorkers(runCtx, workerCollectors, countLimit)
+		expectedScheduledRequests = expectedArrivals(scheduleDuration, e.cfg.RPS, e.cfg.RampUp, e.cfg.Concurrency)
+		if countLimit >= 0 && expectedScheduledRequests > countLimit {
+			expectedScheduledRequests = countLimit
+		}
 	} else {
 		e.runWorkers(runCtx, remainingPtr, workerCollectors, true)
 	}
@@ -90,10 +97,39 @@ func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 	summary.ScheduledRequests = scheduledRequests
 	summary.DroppedRequests = droppedRequests
 	summary.TargetRPS = e.cfg.RPS
+	summary.ExpectedScheduledRequests = expectedScheduledRequests
+	summary.ScheduleDuration = scheduleDuration
 	if err := e.collector.RecordingError(); err != nil {
 		return summary, fmt.Errorf("engine: failed to record request result: %w", err)
 	}
 	return summary, nil
+}
+
+func expectedArrivals(duration time.Duration, targetRPS float64, rampUp time.Duration, concurrency int) int64 {
+	if duration <= 0 || targetRPS <= 0 {
+		return 0
+	}
+	elapsed := duration.Seconds()
+	if rampUp <= 0 {
+		return int64(1 + elapsed*targetRPS)
+	}
+
+	rampSeconds := rampUp.Seconds()
+	minimumFraction := 1 / float64(concurrency+1)
+	minimumRampSeconds := rampSeconds * minimumFraction
+	expected := 0.0
+	switch {
+	case elapsed <= minimumRampSeconds:
+		expected = elapsed * targetRPS * minimumFraction
+	case elapsed < rampSeconds:
+		expected = minimumRampSeconds*targetRPS*minimumFraction +
+			targetRPS*(elapsed*elapsed-minimumRampSeconds*minimumRampSeconds)/(2*rampSeconds)
+	default:
+		expected = minimumRampSeconds*targetRPS*minimumFraction +
+			targetRPS*(rampSeconds*rampSeconds-minimumRampSeconds*minimumRampSeconds)/(2*rampSeconds) +
+			targetRPS*(elapsed-rampSeconds)
+	}
+	return int64(expected)
 }
 
 // Config returns the Engine's underlying Config.
