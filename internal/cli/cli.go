@@ -86,47 +86,57 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 	if csvWriter != nil {
 		csvCloseErr = csvWriter.Close()
 	}
-	if result.err != nil {
-		return fmt.Errorf("cli: load test run failed: %w", errors.Join(result.err, csvCloseErr))
-	}
-	if csvCloseErr != nil {
-		return fmt.Errorf("cli: failed to finalize CSV export: %w", csvCloseErr)
-	}
-
 	summary := result.summary
 
 	reporter.PrintSummary(stdout, summary)
 
-	if cfg.OutputCSV != "" {
+	if cfg.OutputCSV != "" && csvCloseErr == nil {
 		fmt.Fprintf(stdout, "CSV report written to %s\n", cfg.OutputCSV)
 	}
 
+	var exportErr error
 	if cfg.OutputJSON != "" {
 		if err := exporter.ExportJSON(cfg.OutputJSON, summary); err != nil {
-			return fmt.Errorf("cli: failed to export JSON: %w", err)
+			exportErr = errors.Join(exportErr, fmt.Errorf("cli: failed to export JSON: %w", err))
+		} else {
+			fmt.Fprintf(stdout, "JSON summary written to %s\n", cfg.OutputJSON)
 		}
-		fmt.Fprintf(stdout, "JSON summary written to %s\n", cfg.OutputJSON)
 	}
 	if cfg.OutputTimeSeriesCSV != "" {
 		if err := exporter.ExportTimeSeriesCSV(cfg.OutputTimeSeriesCSV, summary.TimeSeries); err != nil {
-			return fmt.Errorf("cli: failed to export time series CSV: %w", err)
+			exportErr = errors.Join(exportErr, fmt.Errorf("cli: failed to export time series CSV: %w", err))
+		} else {
+			fmt.Fprintf(stdout, "Time series CSV written to %s\n", cfg.OutputTimeSeriesCSV)
 		}
-		fmt.Fprintf(stdout, "Time series CSV written to %s\n", cfg.OutputTimeSeriesCSV)
 	}
 
 	failures := checkThresholds(summary, cfg)
+	var thresholdErr error
 	if len(failures) > 0 {
 		fmt.Fprintln(stdout, "Thresholds failed:")
 		for _, failure := range failures {
 			fmt.Fprintf(stdout, "  - %s\n", failure)
 		}
-		return &ThresholdError{Failures: failures}
+		thresholdErr = &ThresholdError{Failures: failures}
 	}
 	if cfg.MaxP95 != nil || cfg.MaxErrorRate != nil {
-		fmt.Fprintln(stdout, "Thresholds passed")
+		if len(failures) == 0 {
+			fmt.Fprintln(stdout, "Thresholds passed")
+		}
 	}
 
-	return nil
+	var runErr error
+	if result.err != nil {
+		runErr = fmt.Errorf("cli: load test run failed: %w", result.err)
+	}
+	if csvCloseErr != nil {
+		runErr = errors.Join(runErr, fmt.Errorf("cli: failed to finalize CSV export: %w", csvCloseErr))
+	}
+	if exportErr != nil {
+		runErr = errors.Join(runErr, exportErr)
+	}
+
+	return errors.Join(runErr, thresholdErr)
 }
 
 func checkThresholds(summary models.Summary, cfg *config.Config) []string {

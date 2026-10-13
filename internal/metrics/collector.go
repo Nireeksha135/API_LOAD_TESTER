@@ -1,7 +1,6 @@
 // Package metrics provides a thread-safe collector that aggregates
 // request results into live snapshots and final summaries. Latency
 // percentiles use a bounded-memory HDR histogram.
-
 package metrics
 
 import (
@@ -131,7 +130,6 @@ func (c *Collector) NewWorkerCollectors(count int) []*Collector {
 
 func (c *Collector) Record(result models.RequestResult) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	c.totalRequests++
 	latencyNanos := result.Latency.Nanoseconds()
@@ -178,8 +176,17 @@ func (c *Collector) Record(result models.RequestResult) {
 		second := int64(elapsed / time.Second)
 		c.timeSeries.record(second, result)
 	}
-	if c.resultObserver != nil && c.recordingErr == nil {
-		c.recordingErr = c.resultObserver(result)
+	observer := c.resultObserver
+	c.mu.Unlock()
+
+	if observer != nil {
+		if err := observer(result); err != nil {
+			c.mu.Lock()
+			if c.recordingErr == nil {
+				c.recordingErr = err
+			}
+			c.mu.Unlock()
+		}
 	}
 }
 

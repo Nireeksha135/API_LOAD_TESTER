@@ -70,7 +70,7 @@ Performance Analysis
 Terminal / CSV / JSON
 ```
 
-Each worker records results in its own collector. Live dashboard snapshots aggregate those collectors, and the final summary merges their counters and HDR histograms. The shared per-second time series avoids duplicating latency bins for every worker. Summary percentiles use a two-significant-digit HDR histogram across the full supported latency range. The per-second time-series P95 is approximate: it uses coarse latency bins and reports each bin's upper edge, so it can read up to about 25% higher than the underlying latency.
+Each worker records results in its own collector. Live dashboard snapshots aggregate those collectors, and the final summary merges their counters and HDR histograms. The shared per-second time series avoids duplicating latency bins for every worker. Summary percentiles use a two-significant-digit HDR histogram across the full supported latency range, so percentile estimates can read about 1% high; a threshold close to the true percentile may fail because of histogram precision. The per-second time-series P95 is approximate: it uses coarse latency bins and reports each bin's upper edge, so it can read up to about 25% higher than the underlying latency.
 
 ---
 
@@ -132,7 +132,7 @@ api-load-tester -url https://api.example.com/health -n 1000 -c 50 \
 
 ### Arrival Rate and Ramp
 
-`-rps` schedules arrivals independently of request completion, using deadlines anchored to the scheduler start and catching up after late timer wakeups. `-c` caps in-flight requests; when all workers are occupied, arrivals are counted as dropped and included in the error-rate threshold. The final report shows achieved request throughput alongside the target RPS.
+`-rps` schedules arrivals independently of request completion, using deadlines anchored to the scheduler start and catching up after late timer wakeups. Target RPS is capped at 100,000, and catch-up work is bounded per timer wake-up. `-c` caps in-flight requests; when all workers are occupied, arrivals are counted as dropped and included in the error-rate threshold. The final report shows scheduled arrivals per elapsed second and the percentage of target RPS achieved, alongside completed requests/sec.
 
 ```bash
 api-load-tester -url https://api.example.com/health -d 30s -c 100 \
@@ -174,7 +174,7 @@ max-error-rate: 1%
 api-load-tester -config load-test.yaml -c 100 -json summary.json
 ```
 
-JSON reports include numeric nanosecond/millisecond duration values and a readable `total_duration_human` string. The JSON `errors` field is an object mapping error messages to occurrence counts; older report versions used an array, so consumers that expect that prior shape must be updated. Use `-time-series-csv` for a separate per-second CSV alongside the per-request `-csv` export.
+JSON reports include numeric nanosecond/millisecond duration values and a readable `total_duration_human` string. The JSON `errors` field is an object mapping error messages to occurrence counts; older report versions used an array, so consumers that expect that prior shape must be updated. Per-request CSV rows are streamed in request-completion order; the `start_time` column records request initiation time, and rows are not sorted by it. Use `-time-series-csv` for a separate per-second CSV alongside the per-request `-csv` export.
 
 ---
 

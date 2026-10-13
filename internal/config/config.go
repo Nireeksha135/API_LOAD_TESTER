@@ -31,7 +31,6 @@ var validMethods = map[string]bool{
 }
 
 // Config holds all the parameters that control a single load test run.
-
 type Config struct {
 	// TargetURL is the fully-qualified URL to send requests to.
 	TargetURL string
@@ -57,7 +56,7 @@ type Config struct {
 	// issue requests simultaneously.
 	Concurrency int
 
-	// RPS is the optional target arrival rate. Zero preserves closed-loop mode.
+	// RPS is the optional target arrival rate, capped at 100,000. Zero preserves closed-loop mode.
 	RPS float64
 
 	// TotalRequests is the total number of requests to issue across
@@ -177,8 +176,8 @@ func (c *Config) Validate() error {
 	if c.Concurrency <= 0 {
 		return fmt.Errorf("config: concurrency must be greater than 0, got %d", c.Concurrency)
 	}
-	if math.IsNaN(c.RPS) || math.IsInf(c.RPS, 0) || c.RPS < 0 || c.RPS > 1e9 {
-		return fmt.Errorf("config: RPS must be between 0 and 1e9, got %g", c.RPS)
+	if math.IsNaN(c.RPS) || math.IsInf(c.RPS, 0) || c.RPS < 0 || c.RPS > 100_000 {
+		return fmt.Errorf("config: RPS must be between 0 and 100000, got %g", c.RPS)
 	}
 
 	if c.UseDuration {

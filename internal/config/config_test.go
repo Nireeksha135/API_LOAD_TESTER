@@ -59,6 +59,7 @@ func TestValidateRejectsInvalidValues(t *testing.T) {
 		{"unsupported method", func(c *Config) { c.Method = "OPTIONS" }},
 		{"invalid concurrency", func(c *Config) { c.Concurrency = 0 }},
 		{"negative RPS", func(c *Config) { c.RPS = -1 }},
+		{"RPS above scheduler cap", func(c *Config) { c.RPS = 100_001 }},
 		{"excessive RPS", func(c *Config) { c.RPS = 1e10 }},
 		{"negative warmup", func(c *Config) { c.Warmup = -time.Second }},
 		{"negative ramp-up", func(c *Config) { c.RampUp = -time.Second }},

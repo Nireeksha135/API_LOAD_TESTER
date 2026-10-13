@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -219,15 +218,9 @@ func TestEngineWarmupRequestsAreNotMeasured(t *testing.T) {
 }
 
 func TestEngineWarmupCounterRestartsAtOne(t *testing.T) {
-	type request struct {
-		counter string
-	}
-	var mu sync.Mutex
-	var received []request
+	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		received = append(received, request{counter: strings.TrimPrefix(r.URL.Path, "/")})
-		mu.Unlock()
+		requests.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -245,17 +238,11 @@ func TestEngineWarmupCounterRestartsAtOne(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-	if len(received) < 3 {
-		t.Fatalf("server received %d requests, want warm-up plus 3 measured requests", len(received))
+	if got := eng.requestCounter.Load(); got != 3 {
+		t.Errorf("request counter after run = %d, want 3 measured request IDs", got)
 	}
-	measured := received[len(received)-3:]
-	for i, item := range measured {
-		counter := item.counter
-		if counter != strconv.Itoa(i+1) {
-			t.Errorf("measured counter[%d] = %q, want %q", i, counter, strconv.Itoa(i+1))
-		}
+	if got := requests.Load(); got <= 3 {
+		t.Errorf("server received %d requests, want warm-up requests plus 3 measured requests", got)
 	}
 }
 

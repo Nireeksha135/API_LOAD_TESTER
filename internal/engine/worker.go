@@ -13,6 +13,8 @@ import (
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
 )
 
+const maxCatchUpArrivalsPerWake = 10_000
+
 func (e *Engine) doRequest(ctx context.Context, workerID int) models.RequestResult {
 	start := time.Now()
 
@@ -175,9 +177,13 @@ func (e *Engine) runRateWorkers(ctx context.Context, collectors []*metrics.Colle
 		case <-ctx.Done():
 			goto done
 		case <-timer.C:
-			now := time.Now()
-			for !nextArrival.After(now) && (countLimit < 0 || scheduled < countLimit) && ctx.Err() == nil {
+			catchUp := 0
+			for catchUp < maxCatchUpArrivalsPerWake &&
+				!nextArrival.After(time.Now()) &&
+				(countLimit < 0 || scheduled < countLimit) &&
+				ctx.Err() == nil {
 				startRequest()
+				catchUp++
 				elapsed := nextArrival.Sub(started)
 				nextArrival = nextArrival.Add(intervalFor(elapsed))
 			}
