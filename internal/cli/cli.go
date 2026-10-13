@@ -117,6 +117,9 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 
 func checkThresholds(summary models.Summary, cfg *config.Config) []string {
 	var failures []string
+	if (cfg.MaxP95 != nil || cfg.MaxErrorRate != nil) && summary.TotalRequests == 0 {
+		return []string{"no requests completed; thresholds cannot be evaluated"}
+	}
 	if cfg.MaxP95 != nil && summary.P95 > *cfg.MaxP95 {
 		failures = append(failures, fmt.Sprintf("P95 %s exceeds maximum %s", summary.P95, *cfg.MaxP95))
 	}

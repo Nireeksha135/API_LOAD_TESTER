@@ -341,6 +341,21 @@ func TestCheckThresholdsUsesStrictLimits(t *testing.T) {
 	}
 }
 
+func TestCheckThresholdsFailWhenNoRequestsWereMeasured(t *testing.T) {
+	maxP95 := time.Second
+	cfg := &config.Config{MaxP95: &maxP95}
+	summary := models.Summary{}
+
+	failures := checkThresholds(summary, cfg)
+	if len(failures) != 1 || !strings.Contains(failures[0], "no requests completed") {
+		t.Errorf("checkThresholds() = %v, want an explicit no-measurements failure", failures)
+	}
+
+	if failures := checkThresholds(summary, &config.Config{}); len(failures) != 0 {
+		t.Errorf("checkThresholds() without thresholds = %v, want no failure", failures)
+	}
+}
+
 func TestParseArgsAndRunEndToEndCountMode(t *testing.T) {
 	var requests int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

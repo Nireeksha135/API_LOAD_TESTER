@@ -43,6 +43,9 @@ func PrintSummary(out io.Writer, summary models.Summary) {
 	fmt.Fprintf(out, "Requests/sec:      %.2f\n", summary.RequestsPerSecond)
 	fmt.Fprintf(out, "Total Bytes Read:  %s\n", utils.FormatBytes(summary.TotalBytesRead))
 	fmt.Fprintf(out, "Throughput:        %s/s\n", utils.FormatBytes(int64(summary.ThroughputBytesPerSecond)))
+	if summary.TargetRPS > 0 {
+		fmt.Fprintf(out, "Achieved RPS:      %.2f\n", summary.RequestsPerSecond)
+	}
 	fmt.Fprintln(out, subDivider)
 
 	fmt.Fprintln(out, "Latency:")

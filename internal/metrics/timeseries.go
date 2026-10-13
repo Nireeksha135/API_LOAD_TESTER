@@ -2,6 +2,8 @@ package metrics
 
 import (
 	"math/bits"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
@@ -12,15 +14,65 @@ const timeSeriesLatencyBinCount = 256
 type secondBucket struct {
 	requests int64
 	errors   int64
-	latency  [timeSeriesLatencyBinCount]uint32
+	latency  [timeSeriesLatencyBinCount]uint64
 }
 
-func (b *secondBucket) record(result models.RequestResult) {
-	b.requests++
-	if !result.Success {
-		b.errors++
+type timeSeriesStore struct {
+	mu      sync.RWMutex
+	buckets map[int64]*atomicSecondBucket
+}
+
+type atomicSecondBucket struct {
+	requests atomic.Uint64
+	errors   atomic.Uint64
+	latency  [timeSeriesLatencyBinCount]atomic.Uint64
+}
+
+func newTimeSeriesStore() *timeSeriesStore {
+	return &timeSeriesStore{buckets: make(map[int64]*atomicSecondBucket)}
+}
+
+func (s *timeSeriesStore) record(second int64, result models.RequestResult) {
+	s.mu.RLock()
+	bucket := s.buckets[second]
+	s.mu.RUnlock()
+	if bucket == nil {
+		s.mu.Lock()
+		bucket = s.buckets[second]
+		if bucket == nil {
+			bucket = &atomicSecondBucket{}
+			s.buckets[second] = bucket
+		}
+		s.mu.Unlock()
 	}
-	latencyNanos := result.Latency.Nanoseconds()
+
+	bucket.requests.Add(1)
+	if !result.Success {
+		bucket.errors.Add(1)
+	}
+	bucket.latency[latencyBin(result.Latency)].Add(1)
+}
+
+func (s *timeSeriesStore) snapshot() map[int64]*secondBucket {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	snapshot := make(map[int64]*secondBucket, len(s.buckets))
+	for second, source := range s.buckets {
+		bucket := &secondBucket{
+			requests: int64(source.requests.Load()),
+			errors:   int64(source.errors.Load()),
+		}
+		for i := range source.latency {
+			bucket.latency[i] = source.latency[i].Load()
+		}
+		snapshot[second] = bucket
+	}
+	return snapshot
+}
+
+func latencyBin(latency time.Duration) int {
+	latencyNanos := latency.Nanoseconds()
 	if latencyNanos < 1 {
 		latencyNanos = 1
 	}
@@ -31,16 +83,7 @@ func (b *secondBucket) record(result models.RequestResult) {
 	if subBucket > 3 {
 		subBucket = 3
 	}
-	bin := exponent*4 + subBucket
-	b.latency[bin]++
-}
-
-func (b *secondBucket) merge(other *secondBucket) {
-	b.requests += other.requests
-	b.errors += other.errors
-	for i, count := range other.latency {
-		b.latency[i] += count
-	}
+	return exponent*4 + subBucket
 }
 
 func (b *secondBucket) p95() time.Duration {

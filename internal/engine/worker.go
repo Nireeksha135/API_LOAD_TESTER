@@ -164,20 +164,30 @@ func (e *Engine) runRateWorkers(ctx context.Context, collectors []*metrics.Colle
 	if e.cfg.RampUp == 0 && ctx.Err() == nil && (countLimit < 0 || countLimit > 0) {
 		startRequest()
 	}
-	timer := time.NewTimer(intervalFor(0))
+	nextArrival := started.Add(intervalFor(0))
+	if e.cfg.RampUp == 0 && scheduled > 0 {
+		nextArrival = started.Add(rateInterval(e.cfg.RPS))
+	}
+	timer := time.NewTimer(time.Until(nextArrival))
 	defer timer.Stop()
 	for (countLimit < 0 || scheduled < countLimit) && ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
 			goto done
 		case <-timer.C:
-			if ctx.Err() != nil {
-				goto done
+			now := time.Now()
+			for !nextArrival.After(now) && (countLimit < 0 || scheduled < countLimit) && ctx.Err() == nil {
+				startRequest()
+				elapsed := nextArrival.Sub(started)
+				nextArrival = nextArrival.Add(intervalFor(elapsed))
 			}
 			if countLimit < 0 || scheduled < countLimit {
-				startRequest()
+				delay := time.Until(nextArrival)
+				if delay < 0 {
+					delay = 0
+				}
+				timer.Reset(delay)
 			}
-			timer.Reset(intervalFor(time.Since(started)))
 		}
 	}
 done:

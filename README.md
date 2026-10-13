@@ -70,7 +70,7 @@ Performance Analysis
 Terminal / CSV / JSON
 ```
 
-Each worker records results in its own collector. Live dashboard snapshots aggregate those collectors, and the final summary merges their counters and HDR histograms. This keeps request recording contention low while latency memory stays bounded for long duration runs.
+Each worker records results in its own collector. Live dashboard snapshots aggregate those collectors, and the final summary merges their counters and HDR histograms. The shared per-second time series avoids duplicating latency bins for every worker. Summary percentiles use a two-significant-digit HDR histogram across the full supported latency range.
 
 ---
 
@@ -123,7 +123,7 @@ api-load-tester \
 
 ### CI Thresholds
 
-Threshold failures leave the final report and requested exports available, then exit with status 1. Error rates accept a fraction or percentage.
+Threshold failures leave the final report and requested exports available, then exit with status 1. Error rates accept a fraction or percentage. When thresholds are configured but no requests complete, the run fails because there is no measurement to evaluate.
 
 ```bash
 api-load-tester -url https://api.example.com/health -n 1000 -c 50 \
@@ -132,7 +132,7 @@ api-load-tester -url https://api.example.com/health -n 1000 -c 50 \
 
 ### Arrival Rate and Ramp
 
-`-rps` schedules arrivals independently of request completion. `-c` caps in-flight requests; when all workers are occupied, arrivals are counted as dropped and included in the error-rate threshold.
+`-rps` schedules arrivals independently of request completion, using deadlines anchored to the scheduler start and catching up after late timer wakeups. `-c` caps in-flight requests; when all workers are occupied, arrivals are counted as dropped and included in the error-rate threshold. The final report shows achieved request throughput alongside the target RPS.
 
 ```bash
 api-load-tester -url https://api.example.com/health -d 30s -c 100 \

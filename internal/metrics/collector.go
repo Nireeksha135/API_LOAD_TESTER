@@ -28,7 +28,7 @@ func WithRawResults() Option {
 // WithTimeSeries enables compact per-second metrics retention.
 func WithTimeSeries() Option {
 	return func(c *Collector) {
-		c.keepTimeSeries = true
+		c.timeSeries = newTimeSeriesStore()
 	}
 }
 
@@ -56,10 +56,9 @@ type Collector struct {
 	errorCounts      map[string]int64
 	workers          []*Collector
 
-	keepRaw        bool
-	rawResults     []models.RequestResult
-	keepTimeSeries bool
-	timeSeries     map[int64]*secondBucket
+	keepRaw    bool
+	rawResults []models.RequestResult
+	timeSeries *timeSeriesStore
 }
 
 // NewCollector creates a new Collector for a run against targetURL using the given HTTP method and concurrency level.
@@ -69,7 +68,7 @@ func NewCollector(targetURL, method string, concurrency int, opts ...Option) *Co
 		method:           method,
 		concurrency:      concurrency,
 		statusCodeCounts: make(map[int]int64),
-		latencies:        hdrhistogram.New(1, maxLatencyNanoseconds, 3),
+		latencies:        hdrhistogram.New(1, maxLatencyNanoseconds, 2),
 		errorCounts:      make(map[string]int64),
 	}
 
@@ -80,10 +79,6 @@ func NewCollector(targetURL, method string, concurrency int, opts ...Option) *Co
 	if c.keepRaw {
 		c.rawResults = make([]models.RequestResult, 0, 1024)
 	}
-	if c.keepTimeSeries {
-		c.timeSeries = make(map[int64]*secondBucket)
-	}
-
 	return c
 }
 
@@ -115,11 +110,9 @@ func (c *Collector) NewWorkerCollectors(count int) []*Collector {
 		if c.keepRaw {
 			opts = append(opts, WithRawResults())
 		}
-		if c.keepTimeSeries {
-			opts = append(opts, WithTimeSeries())
-		}
 		worker := NewCollector(c.targetURL, c.method, c.concurrency, opts...)
 		worker.startTime = c.startTime
+		worker.timeSeries = c.timeSeries
 		workers[i] = worker
 	}
 	c.workers = append(c.workers, workers...)
@@ -167,18 +160,13 @@ func (c *Collector) Record(result models.RequestResult) {
 	if c.keepRaw {
 		c.rawResults = append(c.rawResults, result)
 	}
-	if c.keepTimeSeries {
+	if c.timeSeries != nil {
 		elapsed := result.Timestamp.Sub(c.startTime)
 		if elapsed < 0 {
 			elapsed = 0
 		}
 		second := int64(elapsed / time.Second)
-		bucket := c.timeSeries[second]
-		if bucket == nil {
-			bucket = &secondBucket{}
-			c.timeSeries[second] = bucket
-		}
-		bucket.record(result)
+		c.timeSeries.record(second, result)
 	}
 }
 
@@ -225,16 +213,16 @@ func (c *Collector) aggregateLocked(includeHistogram bool) aggregate {
 		errorCounts:      make(map[string]int64, len(c.errorCounts)),
 	}
 	if includeHistogram {
-		a.latencies = hdrhistogram.New(1, maxLatencyNanoseconds, 3)
-		if c.keepTimeSeries {
-			a.timeSeries = make(map[int64]*secondBucket)
-		}
+		a.latencies = hdrhistogram.New(1, maxLatencyNanoseconds, 2)
 	}
 	a.addCollectorLocked(c, includeHistogram)
 	for _, worker := range c.workers {
 		worker.mu.Lock()
 		a.addCollectorLocked(worker, includeHistogram)
 		worker.mu.Unlock()
+	}
+	if includeHistogram && c.timeSeries != nil {
+		a.timeSeries = c.timeSeries.snapshot()
 	}
 	return a
 }
@@ -261,14 +249,6 @@ func (a *aggregate) addCollectorLocked(c *Collector, includeHistogram bool) {
 	}
 	if includeHistogram {
 		a.latencies.Merge(c.latencies)
-		for second, source := range c.timeSeries {
-			target := a.timeSeries[second]
-			if target == nil {
-				target = &secondBucket{}
-				a.timeSeries[second] = target
-			}
-			target.merge(source)
-		}
 	}
 }
 

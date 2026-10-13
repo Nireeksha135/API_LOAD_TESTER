@@ -142,6 +142,22 @@ func TestCollectorHistogramIsBoundedAndTracksPercentiles(t *testing.T) {
 	}
 }
 
+func TestCollectorHistogramRetainsLongLatencies(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 1)
+	c.Record(models.RequestResult{StatusCode: 200, Latency: 2 * time.Hour, Success: true})
+
+	summary := c.Summary()
+	if summary.MaxLatency != 2*time.Hour {
+		t.Errorf("MaxLatency = %v, want actual 2h latency", summary.MaxLatency)
+	}
+	if summary.P95 < 2*time.Hour || summary.P95 > 2*time.Hour+2*time.Minute {
+		t.Errorf("P95 = %v, want the 2h latency within histogram precision", summary.P95)
+	}
+	if size := c.latencies.ByteSize(); size > 64*1024 {
+		t.Errorf("histogram size = %d bytes, want bounded size below 64 KiB", size)
+	}
+}
+
 func TestCollectorCountsEveryError(t *testing.T) {
 	c := NewCollector("http://example.com", "GET", 1)
 	for i := 0; i < 30; i++ {
@@ -164,6 +180,9 @@ func TestCollectorMergesPerSecondTimeSeries(t *testing.T) {
 	c := NewCollector("http://example.com", "GET", 2, WithTimeSeries())
 	c.Start()
 	workers := c.NewWorkerCollectors(2)
+	if workers[0].timeSeries != workers[1].timeSeries {
+		t.Fatal("worker collectors do not share the time-series store")
+	}
 	start := time.Now()
 	workers[0].Record(models.RequestResult{
 		StatusCode: 200,
