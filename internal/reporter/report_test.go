@@ -49,7 +49,7 @@ func TestPrintSummaryContainsKeyFields(t *testing.T) {
 		"GET",
 		"Total Requests:    1000",
 		"Target RPS:        250.00",
-		"Scheduled RPS:     200.00 (80.0% of scheduled target)",
+		"Scheduled RPS:     200.00 (80.0% of expected arrivals)",
 		"Successful:        980",
 		"Failed:            20",
 		"P50:",

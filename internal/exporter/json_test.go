@@ -24,6 +24,7 @@ func TestExportJSON(t *testing.T) {
 		TotalRequests:             2000,
 		ScheduledRequests:         2100,
 		ExpectedScheduledRequests: 2200,
+		ScheduleDuration:          9 * time.Second,
 		SuccessRequests:           1950,
 		FailedRequests:            50,
 		StatusCodeCounts:          map[int]int64{201: 1950, 429: 45, 0: 5},
@@ -66,6 +67,9 @@ func TestExportJSON(t *testing.T) {
 	}
 	if parsed["expected_scheduled_requests"].(float64) != 2200 {
 		t.Errorf("expected_scheduled_requests = %v, want 2200", parsed["expected_scheduled_requests"])
+	}
+	if parsed["schedule_duration_ms"].(float64) != 9000 {
+		t.Errorf("schedule_duration_ms = %v, want 9000", parsed["schedule_duration_ms"])
 	}
 	if parsed["total_duration_ns"].(float64) != float64(10*time.Second) || parsed["total_duration_human"] != "10s" {
 		t.Errorf("total duration JSON fields = %v / %v, want 10000000000 / 10s", parsed["total_duration_ns"], parsed["total_duration_human"])

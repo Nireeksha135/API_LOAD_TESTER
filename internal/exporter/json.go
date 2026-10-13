@@ -26,6 +26,7 @@ type jsonSummary struct {
 	ScheduledRequests         int64                 `json:"scheduled_requests"`
 	DroppedRequests           int64                 `json:"dropped_requests"`
 	ExpectedScheduledRequests int64                 `json:"expected_scheduled_requests,omitempty"`
+	ScheduleDurationMS        float64               `json:"schedule_duration_ms,omitempty"`
 	TargetRPS                 float64               `json:"target_rps,omitempty"`
 	SuccessRequests           int64                 `json:"success_requests"`
 	FailedRequests            int64                 `json:"failed_requests"`
@@ -89,6 +90,7 @@ func ExportJSON(path string, summary models.Summary) error {
 		ScheduledRequests:         summary.ScheduledRequests,
 		DroppedRequests:           summary.DroppedRequests,
 		ExpectedScheduledRequests: summary.ExpectedScheduledRequests,
+		ScheduleDurationMS:        durationToMS(summary.ScheduleDuration),
 		TargetRPS:                 summary.TargetRPS,
 		SuccessRequests:           summary.SuccessRequests,
 		FailedRequests:            summary.FailedRequests,

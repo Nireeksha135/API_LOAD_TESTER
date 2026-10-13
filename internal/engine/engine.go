@@ -82,9 +82,6 @@ func (e *Engine) Run(ctx context.Context) (models.Summary, error) {
 		}
 		scheduledRequests, droppedRequests, scheduleDuration = e.runRateWorkers(runCtx, workerCollectors, countLimit)
 		expectedScheduledRequests = expectedArrivals(scheduleDuration, e.cfg.RPS, e.cfg.RampUp, e.cfg.Concurrency)
-		if countLimit >= 0 && expectedScheduledRequests > countLimit {
-			expectedScheduledRequests = countLimit
-		}
 	} else {
 		e.runWorkers(runCtx, remainingPtr, workerCollectors, true)
 	}

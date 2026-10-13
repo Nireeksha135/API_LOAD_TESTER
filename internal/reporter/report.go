@@ -50,8 +50,11 @@ func PrintSummary(out io.Writer, summary models.Summary) {
 		}
 		if summary.ExpectedScheduledRequests > 0 {
 			targetRatio = float64(summary.ScheduledRequests) / float64(summary.ExpectedScheduledRequests) * 100
+			if targetRatio > 100 {
+				targetRatio = 100
+			}
 		}
-		fmt.Fprintf(out, "Scheduled RPS:     %.2f (%.1f%% of scheduled target)\n", scheduledRPS, targetRatio)
+		fmt.Fprintf(out, "Scheduled RPS:     %.2f (%.1f%% of expected arrivals)\n", scheduledRPS, targetRatio)
 	}
 	fmt.Fprintln(out, subDivider)
 

@@ -204,8 +204,8 @@ func TestEngineRateModeCountsDroppedArrivals(t *testing.T) {
 	if summary.ScheduledRequests != 10 {
 		t.Errorf("ScheduledRequests = %d, want 10", summary.ScheduledRequests)
 	}
-	if summary.ExpectedScheduledRequests > 10 {
-		t.Errorf("ExpectedScheduledRequests = %d, want count limited to 10", summary.ExpectedScheduledRequests)
+	if summary.ExpectedScheduledRequests < summary.ScheduledRequests {
+		t.Errorf("ExpectedScheduledRequests = %d, want at least scheduled arrivals %d", summary.ExpectedScheduledRequests, summary.ScheduledRequests)
 	}
 	if summary.ScheduleDuration <= 0 || summary.ScheduleDuration >= summary.TotalDuration {
 		t.Errorf("ScheduleDuration = %v, want positive duration shorter than request-drain-inclusive TotalDuration %v", summary.ScheduleDuration, summary.TotalDuration)
