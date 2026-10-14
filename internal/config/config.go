@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -86,6 +87,10 @@ type Config struct {
 	// MaxErrorRate is the optional maximum accepted failure fraction.
 	MaxErrorRate *float64
 
+	// ExpectedStatusCodes, when non-empty, defines exactly which response
+	// status codes count as successful. By default, all status codes below 400 succeed.
+	ExpectedStatusCodes []int
+
 	// OutputCSV, if non-empty, is the file path to export a CSV report
 	// of every individual request result.
 	OutputCSV string
@@ -104,13 +109,15 @@ type Config struct {
 	// for testing against local/self-signed HTTPS endpoints.
 	InsecureSkipVerify bool
 
+	// EnableHTTP2 allows HTTP/2 negotiation for HTTPS targets.
+	EnableHTTP2 bool
+
 	// DisableKeepAlives, if true, forces a new TCP connection per
 	// request instead of reusing pooled connections.
 	DisableKeepAlives bool
 
-	// MaxIdleConnsPerHost controls HTTP client connection pooling and
-	// should generally be set to at least Concurrency for accurate,
-	// non-connection-starved benchmarking.
+	// MaxIdleConnsPerHost is the configured lower bound for per-host idle
+	// connections; the client raises it to Concurrency when necessary.
 	MaxIdleConnsPerHost int
 }
 
@@ -127,6 +134,7 @@ func NewDefaultConfig() *Config {
 		Timeout:             30 * time.Second,
 		Verbose:             false,
 		InsecureSkipVerify:  false,
+		EnableHTTP2:         true,
 		DisableKeepAlives:   false,
 		MaxIdleConnsPerHost: 100,
 	}
@@ -205,6 +213,11 @@ func (c *Config) Validate() error {
 	if c.MaxErrorRate != nil && (math.IsNaN(*c.MaxErrorRate) || math.IsInf(*c.MaxErrorRate, 0) || *c.MaxErrorRate < 0 || *c.MaxErrorRate > 1) {
 		return fmt.Errorf("config: max error rate must be between 0 and 1, got %g", *c.MaxErrorRate)
 	}
+	for _, status := range c.ExpectedStatusCodes {
+		if status < 100 || status > 599 {
+			return fmt.Errorf("config: expected status codes must be between 100 and 599, got %d", status)
+		}
+	}
 
 	if c.MaxIdleConnsPerHost <= 0 {
 		return fmt.Errorf("config: max idle conns per host must be greater than 0, got %d", c.MaxIdleConnsPerHost)
@@ -215,6 +228,38 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+// IsSuccessStatusCode reports whether status satisfies the configured success rule.
+func (c *Config) IsSuccessStatusCode(status int) bool {
+	if len(c.ExpectedStatusCodes) == 0 {
+		return status < http.StatusBadRequest
+	}
+	for _, expected := range c.ExpectedStatusCodes {
+		if status == expected {
+			return true
+		}
+	}
+	return false
+}
+
+// ParseExpectedStatusCodes parses a comma-separated list of HTTP status codes.
+func ParseExpectedStatusCodes(raw string) ([]int, error) {
+	parts := strings.Split(raw, ",")
+	statuses := make([]int, 0, len(parts))
+	seen := make(map[int]struct{}, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		status, err := strconv.Atoi(part)
+		if err != nil || status < 100 || status > 599 {
+			return nil, fmt.Errorf("config: invalid expected status code %q: must be an integer between 100 and 599", part)
+		}
+		if _, exists := seen[status]; !exists {
+			statuses = append(statuses, status)
+			seen[status] = struct{}{}
+		}
+	}
+	return statuses, nil
 }
 
 func ParseHeaders(raw []string) (map[string]string, error) {

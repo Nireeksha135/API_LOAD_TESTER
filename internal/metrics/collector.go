@@ -4,6 +4,7 @@
 package metrics
 
 import (
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -162,7 +163,7 @@ func (c *Collector) Record(result models.RequestResult) {
 	}
 
 	if result.Err != nil {
-		c.errorCounts[result.Err.Error()]++
+		c.errorCounts[errorGroupKey(result.Err)]++
 	}
 
 	if c.keepRaw {
@@ -187,6 +188,16 @@ func (c *Collector) Record(result models.RequestResult) {
 			}
 			c.mu.Unlock()
 		}
+	}
+}
+
+func errorGroupKey(err error) string {
+	for {
+		cause := errors.Unwrap(err)
+		if cause == nil {
+			return err.Error()
+		}
+		err = cause
 	}
 }
 

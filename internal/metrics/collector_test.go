@@ -166,13 +166,18 @@ func TestCollectorCountsEveryError(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		c.Record(models.RequestResult{Err: errors.New("repeated failure")})
 	}
+	c.Record(models.RequestResult{Err: fmt.Errorf("Get \"http://example.com/items/1\": %w", errors.New("connection reset"))})
+	c.Record(models.RequestResult{Err: fmt.Errorf("Get \"http://example.com/items/2\": %w", errors.New("connection reset"))})
 
 	errors := c.Summary().Errors
-	if len(errors) != 31 {
-		t.Errorf("len(Errors) = %d, want all 31 distinct messages", len(errors))
+	if len(errors) != 32 {
+		t.Errorf("len(Errors) = %d, want 30 unique failures, one repeated failure, and one unwrapped cause", len(errors))
 	}
 	if errors["repeated failure"] != 4 {
 		t.Errorf("Errors[repeated failure] = %d, want 4", errors["repeated failure"])
+	}
+	if errors["connection reset"] != 2 {
+		t.Errorf("Errors[connection reset] = %d, want 2 URL-independent failures", errors["connection reset"])
 	}
 }
 

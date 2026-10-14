@@ -37,6 +37,9 @@ func PrintSummary(out io.Writer, summary models.Summary) {
 	if summary.TargetRPS > 0 {
 		fmt.Fprintf(out, "Target RPS:        %.2f\n", summary.TargetRPS)
 		fmt.Fprintf(out, "Scheduled:         %d  Dropped: %d\n", summary.ScheduledRequests, summary.DroppedRequests)
+		if summary.DroppedRequests > 0 {
+			fmt.Fprintln(out, "WARNING: arrivals were dropped; latency percentiles exclude requests that never started.")
+		}
 	}
 	fmt.Fprintf(out, "Successful:        %d\n", summary.SuccessRequests)
 	fmt.Fprintf(out, "Failed:            %d\n", summary.FailedRequests)

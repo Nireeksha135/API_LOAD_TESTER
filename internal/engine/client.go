@@ -10,17 +10,22 @@ import (
 )
 
 func NewHTTPClient(cfg *config.Config) *http.Client {
+	maxIdleConnsPerHost := cfg.MaxIdleConnsPerHost
+	if cfg.Concurrency > maxIdleConnsPerHost {
+		maxIdleConnsPerHost = cfg.Concurrency
+	}
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   cfg.Timeout,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		MaxIdleConns:          cfg.MaxIdleConnsPerHost * 4,
-		MaxIdleConnsPerHost:   cfg.MaxIdleConnsPerHost,
+		MaxIdleConns:          maxIdleConnsPerHost * 4,
+		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
 		MaxConnsPerHost:       0, // no cap; let concurrency setting govern load
 		IdleConnTimeout:       90 * time.Second,
 		DisableKeepAlives:     cfg.DisableKeepAlives,
+		ForceAttemptHTTP2:     cfg.EnableHTTP2,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		TLSClientConfig: &tls.Config{

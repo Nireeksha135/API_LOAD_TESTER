@@ -24,6 +24,7 @@ The project focuses on **concurrency, worker pools, HTTP networking, thread-safe
 
 - GET, POST, PUT, DELETE, PATCH and HEAD requests
 - Configurable concurrency
+- HTTP/2 negotiation for HTTPS targets (enabled by default)
 - Worker pool architecture
 - Fixed request count mode
 - Fixed duration mode
@@ -36,7 +37,7 @@ The project focuses on **concurrency, worker pools, HTTP networking, thread-safe
 - JSON and raw request bodies
 - Per-request latency tracking
 - Bounded-memory HDR histogram percentiles
-- Error counts grouped by message
+- Error counts grouped by underlying cause
 - Min / Max / Mean latency
 - P50 / P90 / P95 / P99 / P99.9 percentiles
 - Requests Per Second (RPS)
@@ -89,7 +90,7 @@ The tool measures:
 | P95 | 95th percentile latency |
 | P99 | 99th percentile latency |
 | Status Codes | HTTP response distribution |
-| Errors | Count of each distinct error message |
+| Errors | Count of each distinct unwrapped error cause |
 
 ---
 
@@ -132,12 +133,20 @@ api-load-tester -url https://api.example.com/health -n 1000 -c 50 \
 
 ### Arrival Rate and Ramp
 
-`-rps` schedules arrivals independently of request completion, using deadlines anchored to the scheduler start and catching up after late timer wakeups. Target RPS is capped at 100,000, and catch-up work is bounded per timer wake-up. `-c` caps in-flight requests; when all workers are occupied, arrivals are counted as dropped and included in the error-rate threshold. The final report shows scheduled arrivals per scheduling second and adherence to the expected arrival count (including ramp-up), alongside completed requests/sec. With `-csv`, results are queued to a single writer; if the disk is slower than the request rate, the bounded queue can fill and briefly apply backpressure to request workers.
+`-rps` schedules arrivals independently of request completion, using deadlines anchored to the scheduler start and catching up after late timer wakeups. Target RPS is capped at 100,000, and catch-up work is bounded per timer wake-up. `-c` caps in-flight requests; when all workers are occupied, arrivals are counted as dropped and included in the error-rate threshold. The final report shows scheduled arrivals per scheduling second and adherence to the expected arrival count (including ramp-up), alongside completed requests/sec. It prints a warning when arrivals are dropped because latency percentiles include only requests that started. Requests still in flight when `-d` expires are recorded as cancelled failures instead of being omitted. With `-csv`, results are queued to a single writer; if the disk is slower than the request rate, the bounded queue can fill and briefly apply backpressure to request workers.
 
 ```bash
 api-load-tester -url https://api.example.com/health -d 30s -c 100 \
     -rps 200 -warmup 5s -ramp-up 10s -json summary.json \
     -time-series-csv seconds.csv
+```
+
+### Status Codes and Redirects
+
+Redirects are not followed: the response status is measured as returned by the target. By default, any status below 400—including 3xx redirects—counts as success. Use `-expect-status` to replace that rule with an explicit comma-separated allowlist; for example, `-expect-status 200,201` treats only 200 and 201 as successful. HTTP/2 negotiation is enabled by default for HTTPS targets and can be disabled with `-http2=false`.
+
+```bash
+api-load-tester -url https://api.example.com/items -expect-status 200,201
 ```
 
 ### Dynamic Requests
@@ -168,13 +177,16 @@ warmup: 5s
 ramp-up: 10s
 max-p95: 200ms
 max-error-rate: 1%
+expect-status: 200,201
+http2: true
+http2: true
 ```
 
 ```bash
 api-load-tester -config load-test.yaml -c 100 -json summary.json
 ```
 
-JSON reports include numeric nanosecond/millisecond duration values and a readable `total_duration_human` string. The JSON `errors` field is an object mapping error messages to occurrence counts; older report versions used an array, so consumers that expect that prior shape must be updated. Per-request CSV rows are streamed in request-completion order; the `start_time` column records request initiation time, and rows are not sorted by it. Use `-time-series-csv` for a separate per-second CSV alongside the per-request `-csv` export.
+JSON reports include numeric nanosecond/millisecond duration values and a readable `total_duration_human` string. The JSON `errors` field is an object mapping unwrapped error causes to occurrence counts; older report versions used an array, so consumers that expect that prior shape must be updated. Per-request CSV rows are streamed in request-completion order; the `start_time` column records request initiation time, and rows are not sorted by it. Use `-time-series-csv` for a separate per-second CSV alongside the per-request `-csv` export.
 
 ---
 

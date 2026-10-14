@@ -88,6 +88,19 @@ func TestPrintSummaryNoErrorsSection(t *testing.T) {
 	}
 }
 
+func TestPrintSummaryWarnsWhenRateArrivalsAreDropped(t *testing.T) {
+	summary := models.Summary{
+		TargetRPS:         10,
+		ScheduledRequests: 10,
+		DroppedRequests:   2,
+	}
+	var buf bytes.Buffer
+	PrintSummary(&buf, summary)
+	if !strings.Contains(buf.String(), "WARNING: arrivals were dropped; latency percentiles exclude requests that never started.") {
+		t.Errorf("PrintSummary() missing dropped-arrival latency warning:\n%s", buf.String())
+	}
+}
+
 func TestCenterText(t *testing.T) {
 	got := centerText("HELLO", 11)
 	want := "   HELLO"

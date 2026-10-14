@@ -28,11 +28,13 @@ type yamlConfig struct {
 	Timeout             string            `yaml:"timeout"`
 	MaxP95              string            `yaml:"max-p95"`
 	MaxErrorRate        string            `yaml:"max-error-rate"`
+	ExpectedStatus      string            `yaml:"expect-status"`
 	CSV                 string            `yaml:"csv"`
 	JSON                string            `yaml:"json"`
 	TimeSeriesCSV       string            `yaml:"time-series-csv"`
 	Verbose             *bool             `yaml:"verbose"`
 	Insecure            *bool             `yaml:"insecure"`
+	HTTP2               *bool             `yaml:"http2"`
 	DisableKeepAlives   *bool             `yaml:"disable-keep-alives"`
 	MaxIdleConnsPerHost *int              `yaml:"max-idle-conns"`
 }
@@ -109,6 +111,12 @@ func LoadYAML(path string) (*Config, error) {
 		}
 		cfg.MaxErrorRate = &limit
 	}
+	if file.ExpectedStatus != "" {
+		cfg.ExpectedStatusCodes, err = ParseExpectedStatusCodes(file.ExpectedStatus)
+		if err != nil {
+			return nil, fmt.Errorf("config: invalid YAML expect-status: %w", err)
+		}
+	}
 	cfg.OutputCSV = file.CSV
 	cfg.OutputJSON = file.JSON
 	cfg.OutputTimeSeriesCSV = file.TimeSeriesCSV
@@ -117,6 +125,9 @@ func LoadYAML(path string) (*Config, error) {
 	}
 	if file.Insecure != nil {
 		cfg.InsecureSkipVerify = *file.Insecure
+	}
+	if file.HTTP2 != nil {
+		cfg.EnableHTTP2 = *file.HTTP2
 	}
 	if file.DisableKeepAlives != nil {
 		cfg.DisableKeepAlives = *file.DisableKeepAlives

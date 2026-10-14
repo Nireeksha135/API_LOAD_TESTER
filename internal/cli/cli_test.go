@@ -131,10 +131,35 @@ func TestUsageListsNewFlags(t *testing.T) {
 	if err == nil {
 		t.Fatal("ParseArgs(-h) error = nil, want help exit")
 	}
-	for _, flag := range []string{"-rps", "-warmup", "-ramp-up", "-max-p95", "-max-error-rate", "-time-series-csv"} {
+	for _, flag := range []string{"-rps", "-warmup", "-ramp-up", "-max-p95", "-max-error-rate", "-expect-status", "-http2", "-time-series-csv"} {
 		if !strings.Contains(errOut.String(), flag) {
 			t.Errorf("usage output missing %s", flag)
 		}
+	}
+}
+
+func TestParseArgsExpectedStatusAndHTTP2(t *testing.T) {
+	var errOut bytes.Buffer
+	opts, err := ParseArgs([]string{
+		"-url", "https://api.example.com",
+		"-expect-status", "200, 201",
+		"-http2=false",
+	}, &errOut)
+	if err != nil {
+		t.Fatalf("ParseArgs() error = %v", err)
+	}
+	if len(opts.Config.ExpectedStatusCodes) != 2 || opts.Config.ExpectedStatusCodes[0] != 200 || opts.Config.ExpectedStatusCodes[1] != 201 {
+		t.Errorf("ExpectedStatusCodes = %v, want [200 201]", opts.Config.ExpectedStatusCodes)
+	}
+	if opts.Config.EnableHTTP2 {
+		t.Error("EnableHTTP2 = true, want false after -http2=false")
+	}
+}
+
+func TestParseArgsRejectsInvalidExpectedStatus(t *testing.T) {
+	var errOut bytes.Buffer
+	if _, err := ParseArgs([]string{"-url", "https://api.example.com", "-expect-status", "200,600"}, &errOut); err == nil {
+		t.Error("ParseArgs() error = nil, want invalid expected-status error")
 	}
 }
 

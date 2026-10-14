@@ -69,6 +69,14 @@ func ParseArgs(args []string, errOut io.Writer) (*Options, error) {
 	if defaults.MaxErrorRate != nil {
 		maxErrorRateDefault = fmt.Sprintf("%g", *defaults.MaxErrorRate)
 	}
+	expectedStatusDefault := ""
+	if len(defaults.ExpectedStatusCodes) > 0 {
+		statuses := make([]string, len(defaults.ExpectedStatusCodes))
+		for i, status := range defaults.ExpectedStatusCodes {
+			statuses[i] = fmt.Sprint(status)
+		}
+		expectedStatusDefault = strings.Join(statuses, ",")
+	}
 
 	var (
 		method      = fs.String("method", defaults.Method, "HTTP method: GET, POST, PUT, DELETE, PATCH, HEAD")
@@ -86,7 +94,9 @@ func ParseArgs(args []string, errOut io.Writer) (*Options, error) {
 		timeout             = fs.Duration("timeout", defaults.Timeout, "Per-request timeout")
 		maxP95              = fs.String("max-p95", maxP95Default, "Fail if P95 latency exceeds this duration, e.g. 200ms")
 		maxErrorRate        = fs.String("max-error-rate", maxErrorRateDefault, "Fail if error rate exceeds this fraction or percentage, e.g. 0.01 or 1%")
+		expectStatus        = fs.String("expect-status", expectedStatusDefault, "Comma-separated response status codes considered successful, e.g. 200,201")
 		insecureSkipVerify  = fs.Bool("insecure", defaults.InsecureSkipVerify, "Skip TLS certificate verification")
+		enableHTTP2         = fs.Bool("http2", defaults.EnableHTTP2, "Enable HTTP/2 negotiation for HTTPS targets")
 		disableKeepAlives   = fs.Bool("disable-keep-alives", defaults.DisableKeepAlives, "Disable HTTP keep-alives (force a new connection per request)")
 		maxIdleConnsPerHost = fs.Int("max-idle-conns", defaults.MaxIdleConnsPerHost, "Max idle connections kept open per host")
 
@@ -160,7 +170,15 @@ func ParseArgs(args []string, errOut io.Writer) (*Options, error) {
 		}
 		cfg.MaxErrorRate = &limit
 	}
+	if raw := strings.TrimSpace(*expectStatus); raw != "" {
+		statuses, err := config.ParseExpectedStatusCodes(raw)
+		if err != nil {
+			return nil, fmt.Errorf("cli: invalid -expect-status %q: %w", raw, err)
+		}
+		cfg.ExpectedStatusCodes = statuses
+	}
 	cfg.InsecureSkipVerify = *insecureSkipVerify
+	cfg.EnableHTTP2 = *enableHTTP2
 	cfg.DisableKeepAlives = *disableKeepAlives
 	cfg.MaxIdleConnsPerHost = *maxIdleConnsPerHost
 	cfg.OutputCSV = strings.TrimSpace(*outputCSV)

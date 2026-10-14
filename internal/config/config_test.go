@@ -67,6 +67,7 @@ func TestValidateRejectsInvalidValues(t *testing.T) {
 		{"invalid duration", func(c *Config) { c.UseDuration = true }},
 		{"invalid timeout", func(c *Config) { c.Timeout = 0 }},
 		{"invalid idle connections", func(c *Config) { c.MaxIdleConnsPerHost = 0 }},
+		{"invalid expected status", func(c *Config) { c.ExpectedStatusCodes = []int{600} }},
 		{"HEAD body", func(c *Config) { c.Method = MethodHEAD; c.Body = "payload" }},
 	}
 	for _, tt := range tests {
@@ -80,6 +81,37 @@ func TestValidateRejectsInvalidValues(t *testing.T) {
 	}
 	if err := (*Config)(nil).Validate(); err == nil {
 		t.Fatal("Validate() on nil config error = nil, want an error")
+	}
+}
+
+func TestParseExpectedStatusCodes(t *testing.T) {
+	got, err := ParseExpectedStatusCodes("200, 201,200")
+	if err != nil {
+		t.Fatalf("ParseExpectedStatusCodes() error = %v", err)
+	}
+	if len(got) != 2 || got[0] != 200 || got[1] != 201 {
+		t.Errorf("ParseExpectedStatusCodes() = %v, want [200 201]", got)
+	}
+	for _, raw := range []string{"", "200,", "99", "600", "abc"} {
+		if _, err := ParseExpectedStatusCodes(raw); err == nil {
+			t.Errorf("ParseExpectedStatusCodes(%q) error = nil, want invalid-code error", raw)
+		}
+	}
+}
+
+func TestSuccessStatusCodeRules(t *testing.T) {
+	cfg := NewDefaultConfig()
+	for _, code := range []int{200, 302, 399} {
+		if !cfg.IsSuccessStatusCode(code) {
+			t.Errorf("default status %d should be successful", code)
+		}
+	}
+	if cfg.IsSuccessStatusCode(400) {
+		t.Error("default status 400 should not be successful")
+	}
+	cfg.ExpectedStatusCodes = []int{200, 201}
+	if !cfg.IsSuccessStatusCode(201) || cfg.IsSuccessStatusCode(302) {
+		t.Error("configured status rule should accept only 200 and 201")
 	}
 }
 
@@ -120,11 +152,13 @@ func TestLoadYAML(t *testing.T) {
 		"timeout: 1s",
 		"max-p95: 200ms",
 		"max-error-rate: 1%",
+		"expect-status: 200,201",
 		"csv: requests.csv",
 		"json: summary.json",
 		"time-series-csv: series.csv",
 		"verbose: true",
 		"insecure: true",
+		"http2: false",
 		"disable-keep-alives: true",
 		"max-idle-conns: 20",
 	}, "\n"))
@@ -150,6 +184,9 @@ func TestLoadYAML(t *testing.T) {
 	}
 	if cfg.MaxP95 == nil || *cfg.MaxP95 != 200*time.Millisecond || cfg.MaxErrorRate == nil || *cfg.MaxErrorRate != 0.01 {
 		t.Errorf("loaded thresholds = P95:%v error:%v", cfg.MaxP95, cfg.MaxErrorRate)
+	}
+	if len(cfg.ExpectedStatusCodes) != 2 || cfg.ExpectedStatusCodes[0] != 200 || cfg.ExpectedStatusCodes[1] != 201 || cfg.EnableHTTP2 {
+		t.Errorf("loaded status/HTTP2 settings = statuses:%v http2:%t", cfg.ExpectedStatusCodes, cfg.EnableHTTP2)
 	}
 	if cfg.OutputCSV != "requests.csv" || cfg.OutputJSON != "summary.json" || cfg.OutputTimeSeriesCSV != "series.csv" {
 		t.Errorf("loaded output paths = %+v", cfg)

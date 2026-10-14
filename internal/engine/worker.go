@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log"
 	"math"
@@ -49,7 +48,7 @@ func (e *Engine) doRequest(ctx context.Context, workerID int) models.RequestResu
 	n, readErr := io.Copy(io.Discard, resp.Body)
 	latency := time.Since(start)
 
-	success := readErr == nil && resp.StatusCode < 400
+	success := readErr == nil && e.cfg.IsSuccessStatusCode(resp.StatusCode)
 	resultErr := readErr
 
 	return models.RequestResult{
@@ -231,9 +230,6 @@ func durationFromSeconds(seconds float64) time.Duration {
 
 func (e *Engine) recordRequest(ctx context.Context, workerID int, collector *metrics.Collector) bool {
 	result := e.doRequest(ctx, workerID)
-	if ctx.Err() != nil && (errors.Is(result.Err, context.Canceled) || errors.Is(result.Err, context.DeadlineExceeded)) {
-		return false
-	}
 	collector.Record(result)
 	if e.logger != nil && e.verbose {
 		e.logger.Printf(
@@ -241,7 +237,7 @@ func (e *Engine) recordRequest(ctx context.Context, workerID int, collector *met
 			workerID, result.StatusCode, result.Latency, result.BytesRead, result.Err,
 		)
 	}
-	return true
+	return ctx.Err() == nil
 }
 
 func silentLogger() *log.Logger {

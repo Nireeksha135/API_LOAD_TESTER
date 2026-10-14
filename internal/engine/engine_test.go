@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -509,8 +510,59 @@ func TestEngineRunDropsRunCancellationResults(t *testing.T) {
 	default:
 		t.Fatal("request did not start before run cancellation")
 	}
-	if summary.TotalRequests != 0 {
-		t.Errorf("TotalRequests = %d, want 0 for cancelled in-flight request", summary.TotalRequests)
+	if summary.TotalRequests != 1 {
+		t.Errorf("TotalRequests = %d, want 1 for cancelled in-flight request", summary.TotalRequests)
+	}
+	if summary.FailedRequests != 1 || summary.StatusCodeCounts[0] != 1 {
+		t.Errorf("failed=%d status-0=%d, want one recorded cancelled request", summary.FailedRequests, summary.StatusCodeCounts[0])
+	}
+	if summary.Errors["context deadline exceeded"] != 1 {
+		t.Errorf("Errors = %v, want one context deadline exceeded error", summary.Errors)
+	}
+}
+
+func TestHTTP2NegotiationCanBeConfigured(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
+			protocol := make(chan int, 1)
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				protocol <- r.ProtoMajor
+				w.WriteHeader(http.StatusOK)
+			}))
+			server.EnableHTTP2 = true
+			server.StartTLS()
+			defer server.Close()
+
+			cfg := newTestConfig(server.URL)
+			cfg.EnableHTTP2 = enabled
+			cfg.InsecureSkipVerify = true
+			client := NewHTTPClient(cfg)
+			response, err := client.Get(server.URL)
+			if err != nil {
+				t.Fatalf("GET() error = %v", err)
+			}
+			_ = response.Body.Close()
+
+			wantProtocol := 1
+			if enabled {
+				wantProtocol = 2
+			}
+			if got := <-protocol; got != wantProtocol {
+				t.Errorf("negotiated HTTP major version = %d, want %d", got, wantProtocol)
+			}
+		})
+	}
+}
+
+func TestHTTPClientIdlePoolScalesWithConcurrency(t *testing.T) {
+	cfg := newTestConfig("http://example.com")
+	cfg.Concurrency = 250
+	transport := NewHTTPClient(cfg).Transport.(*http.Transport)
+	if transport.MaxIdleConnsPerHost != 250 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want concurrency-sized pool 250", transport.MaxIdleConnsPerHost)
+	}
+	if transport.MaxIdleConns != 1000 {
+		t.Errorf("MaxIdleConns = %d, want 1000", transport.MaxIdleConns)
 	}
 }
 
