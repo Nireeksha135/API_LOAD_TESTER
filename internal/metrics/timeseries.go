@@ -47,7 +47,7 @@ func (s *timeSeriesStore) record(second int64, result models.RequestResult) {
 	}
 
 	bucket.requests.Add(1)
-	if !result.Success {
+	if !result.Success && !result.Cancelled {
 		bucket.errors.Add(1)
 	}
 	bucket.latency[latencyBin(result.Latency)].Add(1)

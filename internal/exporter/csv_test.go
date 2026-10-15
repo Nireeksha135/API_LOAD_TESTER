@@ -68,15 +68,35 @@ func TestExportCSV(t *testing.T) {
 	if rows[1][5] != "true" {
 		t.Errorf("row 1 success = %q, want true", rows[1][5])
 	}
-	if rows[1][6] != "" {
-		t.Errorf("row 1 error = %q, want empty", rows[1][6])
+	if rows[1][6] != "false" || rows[1][7] != "" {
+		t.Errorf("row 1 cancelled/error = %q/%q, want false/empty", rows[1][6], rows[1][7])
 	}
 
 	if rows[2][2] != "500" {
 		t.Errorf("row 2 status_code = %q, want 500", rows[2][2])
 	}
-	if rows[2][6] != "server error" {
-		t.Errorf("row 2 error = %q, want %q", rows[2][6], "server error")
+	if rows[2][6] != "false" || rows[2][7] != "server error" {
+		t.Errorf("row 2 cancelled/error = %q/%q, want false/server error", rows[2][6], rows[2][7])
+	}
+}
+
+func TestCSVWriterMarksCancelledRequests(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cancelled.csv")
+	if err := ExportCSV(path, []models.RequestResult{{Cancelled: true}}); err != nil {
+		t.Fatalf("ExportCSV() error = %v", err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open CSV: %v", err)
+	}
+	defer file.Close()
+
+	rows, err := csv.NewReader(file).ReadAll()
+	if err != nil {
+		t.Fatalf("read CSV: %v", err)
+	}
+	if rows[0][6] != "cancelled" || rows[1][6] != "true" {
+		t.Errorf("cancelled column = header:%q value:%q, want cancelled/true", rows[0][6], rows[1][6])
 	}
 }
 

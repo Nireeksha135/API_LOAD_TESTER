@@ -132,8 +132,8 @@ func (d *Dashboard) buildLines(snap metrics.Snapshot) []string {
 	))
 
 	lines = append(lines, fmt.Sprintf(
-		"Success: %-8d  Failed: %-8d  Bytes: %s",
-		snap.SuccessRequests, snap.FailedRequests, utils.FormatBytes(snap.TotalBytesRead),
+		"Success: %-8d  Failed: %-8d  Cancelled: %-8d  Bytes: %s",
+		snap.SuccessRequests, snap.FailedRequests, snap.CancelledRequests, utils.FormatBytes(snap.TotalBytesRead),
 	))
 
 	lines = append(lines, fmt.Sprintf(

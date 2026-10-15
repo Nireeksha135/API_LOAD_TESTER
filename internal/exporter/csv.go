@@ -18,6 +18,7 @@ var csvHeader = []string{
 	"latency_ms",
 	"bytes_read",
 	"success",
+	"cancelled",
 	"error",
 }
 
@@ -81,6 +82,7 @@ func (w *CSVWriter) writeRows() {
 			strconv.FormatFloat(float64(result.Latency.Microseconds())/1000.0, 'f', 3, 64),
 			strconv.FormatInt(result.BytesRead, 10),
 			strconv.FormatBool(result.Success),
+			strconv.FormatBool(result.Cancelled),
 			errMsg,
 		}
 		if err := w.writer.Write(row); err != nil && w.err == nil {

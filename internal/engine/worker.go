@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log"
 	"math"
@@ -230,6 +231,9 @@ func durationFromSeconds(seconds float64) time.Duration {
 
 func (e *Engine) recordRequest(ctx context.Context, workerID int, collector *metrics.Collector) bool {
 	result := e.doRequest(ctx, workerID)
+	if ctx.Err() != nil && (errors.Is(result.Err, context.Canceled) || errors.Is(result.Err, context.DeadlineExceeded)) {
+		result.Cancelled = true
+	}
 	collector.Record(result)
 	if e.logger != nil && e.verbose {
 		e.logger.Printf(

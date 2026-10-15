@@ -119,6 +119,43 @@ func TestCollectorRecordAndSummary(t *testing.T) {
 	}
 }
 
+func TestCollectorCountsCancelledRequestsWithoutTreatingThemAsFailures(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 1, WithTimeSeries())
+	c.Start()
+	timestamp := time.Now()
+	c.Record(models.RequestResult{
+		StatusCode: 200,
+		Latency:    5 * time.Millisecond,
+		Timestamp:  timestamp,
+		Success:    true,
+	})
+	c.Record(models.RequestResult{
+		Latency:   100 * time.Millisecond,
+		Timestamp: timestamp,
+		Err:       errors.New("context deadline exceeded"),
+		Cancelled: true,
+	})
+	c.Stop()
+
+	summary := c.Summary()
+	if summary.TotalRequests != 2 || summary.SuccessRequests != 1 || summary.FailedRequests != 0 || summary.CancelledRequests != 1 {
+		t.Errorf("request counts = total:%d success:%d failed:%d cancelled:%d, want 2/1/0/1",
+			summary.TotalRequests, summary.SuccessRequests, summary.FailedRequests, summary.CancelledRequests)
+	}
+	if summary.P95 < 100*time.Millisecond {
+		t.Errorf("P95 = %s, want cancelled latency included", summary.P95)
+	}
+	if len(summary.Errors) != 0 {
+		t.Errorf("Errors = %v, want cancelled request excluded", summary.Errors)
+	}
+	if len(summary.TimeSeries) == 0 || summary.TimeSeries[0].Requests != 2 || summary.TimeSeries[0].Errors != 0 {
+		t.Errorf("TimeSeries = %+v, want 2 requests and 0 errors", summary.TimeSeries)
+	}
+	if snapshot := c.Snapshot(); snapshot.CancelledRequests != 1 {
+		t.Errorf("Snapshot.CancelledRequests = %d, want 1", snapshot.CancelledRequests)
+	}
+}
+
 func TestCollectorHistogramIsBoundedAndTracksPercentiles(t *testing.T) {
 	c := NewCollector("http://example.com", "GET", 1)
 	initialSize := c.latencies.ByteSize()

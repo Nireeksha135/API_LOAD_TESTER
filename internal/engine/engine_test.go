@@ -480,7 +480,7 @@ func TestEngineSubstitutesRequestTokensAndRotatesURLs(t *testing.T) {
 	}
 }
 
-func TestEngineRunDropsRunCancellationResults(t *testing.T) {
+func TestEngineRunCountsRunCancellationSeparately(t *testing.T) {
 	requestStarted := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
@@ -513,11 +513,14 @@ func TestEngineRunDropsRunCancellationResults(t *testing.T) {
 	if summary.TotalRequests != 1 {
 		t.Errorf("TotalRequests = %d, want 1 for cancelled in-flight request", summary.TotalRequests)
 	}
-	if summary.FailedRequests != 1 || summary.StatusCodeCounts[0] != 1 {
-		t.Errorf("failed=%d status-0=%d, want one recorded cancelled request", summary.FailedRequests, summary.StatusCodeCounts[0])
+	if summary.FailedRequests != 0 || summary.CancelledRequests != 1 || summary.StatusCodeCounts[0] != 1 {
+		t.Errorf("failed=%d cancelled=%d status-0=%d, want 0/1/1", summary.FailedRequests, summary.CancelledRequests, summary.StatusCodeCounts[0])
 	}
-	if summary.Errors["context deadline exceeded"] != 1 {
-		t.Errorf("Errors = %v, want one context deadline exceeded error", summary.Errors)
+	if len(summary.Errors) != 0 {
+		t.Errorf("Errors = %v, want cancellation excluded from errors", summary.Errors)
+	}
+	if summary.P50 < 50*time.Millisecond {
+		t.Errorf("P50 = %s, want cancelled request latency included", summary.P50)
 	}
 }
 

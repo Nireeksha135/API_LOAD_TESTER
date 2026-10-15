@@ -30,6 +30,7 @@ type jsonSummary struct {
 	TargetRPS                 float64               `json:"target_rps,omitempty"`
 	SuccessRequests           int64                 `json:"success_requests"`
 	FailedRequests            int64                 `json:"failed_requests"`
+	CancelledRequests         int64                 `json:"cancelled_requests"`
 	StatusCodeCounts          map[string]int64      `json:"status_code_counts"`
 	MinLatencyMS              float64               `json:"min_latency_ms"`
 	MaxLatencyMS              float64               `json:"max_latency_ms"`
@@ -94,6 +95,7 @@ func ExportJSON(path string, summary models.Summary) error {
 		TargetRPS:                 summary.TargetRPS,
 		SuccessRequests:           summary.SuccessRequests,
 		FailedRequests:            summary.FailedRequests,
+		CancelledRequests:         summary.CancelledRequests,
 		StatusCodeCounts:          statusCodeCounts,
 		MinLatencyMS:              durationToMS(summary.MinLatency),
 		MaxLatencyMS:              durationToMS(summary.MaxLatency),

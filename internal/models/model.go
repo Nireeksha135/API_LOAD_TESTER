@@ -38,6 +38,10 @@ type RequestResult struct {
 	// error and returned an HTTP status code less than 400.
 	Success bool
 
+	// Cancelled indicates the request was interrupted by cancellation
+	// of the load test run rather than by a request-level failure.
+	Cancelled bool
+
 	// WorkerID identifies which worker goroutine produced this result.
 	// Useful for debugging and verbose logging.
 	WorkerID int
@@ -87,13 +91,16 @@ type Summary struct {
 	// a non-error transport result and an HTTP status code < 400.
 	SuccessRequests int64 `json:"success_requests"`
 
-	// FailedRequests is the number of requests that either failed at
-	// the transport level or returned an HTTP status code >= 400.
+	// FailedRequests is the number of non-cancelled requests that either
+	// failed at the transport level or returned an HTTP status code >= 400.
 	FailedRequests int64 `json:"failed_requests"`
 
+	// CancelledRequests is the number of requests interrupted by run cancellation.
+	CancelledRequests int64 `json:"cancelled_requests"`
+
 	// StatusCodeCounts maps HTTP status codes to the number of times
-	// they were observed. A status code of 0 represents transport-
-	// level failures (no HTTP response received).
+	// they were observed. A status code of 0 means no response was received,
+	// including transport failures and cancelled requests.
 	StatusCodeCounts map[int]int64 `json:"status_code_counts"`
 
 	// MinLatency is the smallest observed request latency.

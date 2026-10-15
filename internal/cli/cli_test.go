@@ -399,6 +399,19 @@ func TestCheckThresholdsUsesStrictLimits(t *testing.T) {
 	}
 }
 
+func TestCheckThresholdsExcludesCancelledRequests(t *testing.T) {
+	maxErrorRate := 0.01
+	cfg := &config.Config{MaxErrorRate: &maxErrorRate}
+	summary := models.Summary{
+		TotalRequests:     1364,
+		ScheduledRequests: 1364,
+		CancelledRequests: 49,
+	}
+	if failures := checkThresholds(summary, cfg); len(failures) != 0 {
+		t.Errorf("checkThresholds() = %v, want cancellations excluded from error rate", failures)
+	}
+}
+
 func TestCheckThresholdsFailWhenNoRequestsWereMeasured(t *testing.T) {
 	maxP95 := time.Second
 	cfg := &config.Config{MaxP95: &maxP95}

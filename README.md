@@ -1,5 +1,7 @@
 # API Load Tester
 
+[![Go](https://github.com/Nireeksha135/API_LOAD_TESTER/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/Nireeksha135/API_LOAD_TESTER/actions/workflows/go.yml)
+
 ### A concurrent HTTP API load testing tool built from scratch in Go.
 
 API Load Tester is a CLI-based load testing framework designed to simulate concurrent HTTP traffic and analyze API performance.
@@ -29,6 +31,7 @@ The project focuses on **concurrency, worker pools, HTTP networking, thread-safe
 - Fixed request count mode
 - Fixed duration mode
 - Open-loop target RPS with dropped-arrival accounting
+- Separate tracking for requests cancelled at run shutdown
 - Unmeasured warm-up and gradual ramp-up
 - Per-second RPS, P95 and error time series
 - Round-robin URL targets and per-request counter/random tokens
@@ -90,11 +93,15 @@ The tool measures:
 | P95 | 95th percentile latency |
 | P99 | 99th percentile latency |
 | Status Codes | HTTP response distribution |
-| Errors | Count of each distinct unwrapped error cause |
+| Errors | Count of each distinct unwrapped non-cancellation error cause |
 
 ---
 
 ## Usage
+
+### Download a Release
+
+Prebuilt binaries and checksums for tagged releases are published on [GitHub Releases](https://github.com/Nireeksha135/API_LOAD_TESTER/releases).
 
 ### Build
 
@@ -133,7 +140,7 @@ api-load-tester -url https://api.example.com/health -n 1000 -c 50 \
 
 ### Arrival Rate and Ramp
 
-`-rps` schedules arrivals independently of request completion, using deadlines anchored to the scheduler start and catching up after late timer wakeups. Target RPS is capped at 100,000, and catch-up work is bounded per timer wake-up. `-c` caps in-flight requests; when all workers are occupied, arrivals are counted as dropped and included in the error-rate threshold. The final report shows scheduled arrivals per scheduling second and adherence to the expected arrival count (including ramp-up), alongside completed requests/sec. It prints a warning when arrivals are dropped because latency percentiles include only requests that started. Requests still in flight when `-d` expires are recorded as cancelled failures instead of being omitted. With `-csv`, results are queued to a single writer; if the disk is slower than the request rate, the bounded queue can fill and briefly apply backpressure to request workers.
+`-rps` schedules arrivals independently of request completion, using deadlines anchored to the scheduler start and catching up after late timer wakeups. Target RPS is capped at 100,000, and catch-up work is bounded per timer wake-up. `-c` caps in-flight requests; when all workers are occupied, arrivals are counted as dropped and included in the error-rate threshold. The final report shows scheduled arrivals per scheduling second and adherence to the expected arrival count (including ramp-up), alongside completed requests/sec. It prints a warning when arrivals are dropped because latency percentiles include only requests that started. Requests still in flight when `-d` expires are recorded as cancelled: their elapsed times remain in latency metrics, but they are excluded from failure counts and the error-rate threshold. With `-csv`, results are queued to a single writer; if the disk is slower than the request rate, the bounded queue can fill and briefly apply backpressure to request workers.
 
 ```bash
 api-load-tester -url https://api.example.com/health -d 30s -c 100 \
@@ -143,7 +150,7 @@ api-load-tester -url https://api.example.com/health -d 30s -c 100 \
 
 ### Status Codes and Redirects
 
-Redirects are not followed: the response status is measured as returned by the target. By default, any status below 400—including 3xx redirects—counts as success. Use `-expect-status` to replace that rule with an explicit comma-separated allowlist; for example, `-expect-status 200,201` treats only 200 and 201 as successful. HTTP/2 negotiation is enabled by default for HTTPS targets and can be disabled with `-http2=false`.
+Redirects are not followed: the response status is measured as returned by the target. By default, any status below 400—including 3xx redirects—counts as success. Use `-expect-status` to replace that rule with an explicit comma-separated allowlist; for example, `-expect-status 200,201` treats only 200 and 201 as successful. HTTP/2 negotiation is enabled by default for HTTPS targets and can be disabled with `-http2=false`. Since the default HTTP/2 behavior affects how load is distributed across connections, results from before this change are not directly comparable.
 
 ```bash
 api-load-tester -url https://api.example.com/items -expect-status 200,201
@@ -178,7 +185,6 @@ ramp-up: 10s
 max-p95: 200ms
 max-error-rate: 1%
 expect-status: 200,201
-http2: true
 http2: true
 ```
 

@@ -49,10 +49,11 @@ type Collector struct {
 	startTime time.Time
 	endTime   time.Time
 
-	totalRequests   int64
-	successRequests int64
-	failedRequests  int64
-	totalBytesRead  int64
+	totalRequests     int64
+	successRequests   int64
+	failedRequests    int64
+	cancelledRequests int64
+	totalBytesRead    int64
 
 	minLatency time.Duration
 	maxLatency time.Duration
@@ -156,13 +157,15 @@ func (c *Collector) Record(result models.RequestResult) {
 		}
 	}
 
-	if result.Success {
+	if result.Cancelled {
+		c.cancelledRequests++
+	} else if result.Success {
 		c.successRequests++
 	} else {
 		c.failedRequests++
 	}
 
-	if result.Err != nil {
+	if result.Err != nil && !result.Cancelled {
 		c.errorCounts[errorGroupKey(result.Err)]++
 	}
 
@@ -243,17 +246,18 @@ func (c *Collector) RawResults() []models.RequestResult {
 }
 
 type aggregate struct {
-	totalRequests    int64
-	successRequests  int64
-	failedRequests   int64
-	totalBytesRead   int64
-	sumLatency       time.Duration
-	minLatency       time.Duration
-	maxLatency       time.Duration
-	statusCodeCounts map[int]int64
-	errorCounts      map[string]int64
-	latencies        *hdrhistogram.Histogram
-	timeSeries       map[int64]*secondBucket
+	totalRequests     int64
+	successRequests   int64
+	failedRequests    int64
+	cancelledRequests int64
+	totalBytesRead    int64
+	sumLatency        time.Duration
+	minLatency        time.Duration
+	maxLatency        time.Duration
+	statusCodeCounts  map[int]int64
+	errorCounts       map[string]int64
+	latencies         *hdrhistogram.Histogram
+	timeSeries        map[int64]*secondBucket
 }
 
 func (c *Collector) aggregateLocked(includeHistogram bool) aggregate {
@@ -288,6 +292,7 @@ func (a *aggregate) addCollectorLocked(c *Collector, includeHistogram bool) {
 	a.totalRequests += c.totalRequests
 	a.successRequests += c.successRequests
 	a.failedRequests += c.failedRequests
+	a.cancelledRequests += c.cancelledRequests
 	a.totalBytesRead += c.totalBytesRead
 	a.sumLatency += c.sumLatency
 	for code, count := range c.statusCodeCounts {
@@ -309,6 +314,7 @@ type Snapshot struct {
 	TotalRequests     int64
 	SuccessRequests   int64
 	FailedRequests    int64
+	CancelledRequests int64
 	RequestsPerSecond float64
 
 	StatusCodeCounts map[int]int64
@@ -354,6 +360,7 @@ func (c *Collector) Snapshot() Snapshot {
 		TotalRequests:     data.totalRequests,
 		SuccessRequests:   data.successRequests,
 		FailedRequests:    data.failedRequests,
+		CancelledRequests: data.cancelledRequests,
 		RequestsPerSecond: rps,
 		StatusCodeCounts:  data.statusCodeCounts,
 		MinLatency:        data.minLatency,
@@ -400,6 +407,7 @@ func (c *Collector) Summary() models.Summary {
 		TotalRequests:            data.totalRequests,
 		SuccessRequests:          data.successRequests,
 		FailedRequests:           data.failedRequests,
+		CancelledRequests:        data.cancelledRequests,
 		StatusCodeCounts:         data.statusCodeCounts,
 		MinLatency:               data.minLatency,
 		MaxLatency:               data.maxLatency,

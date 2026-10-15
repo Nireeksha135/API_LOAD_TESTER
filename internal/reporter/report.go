@@ -43,6 +43,7 @@ func PrintSummary(out io.Writer, summary models.Summary) {
 	}
 	fmt.Fprintf(out, "Successful:        %d\n", summary.SuccessRequests)
 	fmt.Fprintf(out, "Failed:            %d\n", summary.FailedRequests)
+	fmt.Fprintf(out, "Cancelled:         %d\n", summary.CancelledRequests)
 	fmt.Fprintf(out, "Requests/sec:      %.2f\n", summary.RequestsPerSecond)
 	fmt.Fprintf(out, "Total Bytes Read:  %s\n", utils.FormatBytes(summary.TotalBytesRead))
 	fmt.Fprintf(out, "Throughput:        %s/s\n", utils.FormatBytes(int64(summary.ThroughputBytesPerSecond)))
