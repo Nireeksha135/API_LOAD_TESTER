@@ -252,8 +252,6 @@ test -z "$(gofmt -l $(find . -type f -name '*.go' -not -path './vendor/*'))"
 
 ### Nireeksha K R
 
-Computer Science & Design Engineering student focused on **UX Design, AI, and Full-Stack Development**.
-
 ---
 
 <p align="center">
