@@ -19,7 +19,6 @@ The project focuses on **concurrency, worker pools, HTTP networking, thread-safe
 ![Concurrency](https://img.shields.io/badge/CONCURRENCY-7B61FF?style=for-the-badge)
 ![CLI](https://img.shields.io/badge/CLI-111111?style=for-the-badge)
 ![Testing](https://img.shields.io/badge/TESTING-2EA44F?style=for-the-badge)
-
 ---
 
 ## Features
