@@ -19,6 +19,13 @@ func main() {
 }
 
 func mainWithExitCode() int {
+	if len(os.Args) > 1 && os.Args[1] == "compare" {
+		if err := cli.Compare(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	opts, err := cli.ParseArgs(os.Args[1:], os.Stderr)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
