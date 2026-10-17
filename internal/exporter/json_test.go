@@ -143,3 +143,22 @@ func TestExportJSONInvalidPath(t *testing.T) {
 		t.Error("ExportJSON() with invalid path: expected error, got nil")
 	}
 }
+
+func TestCompareJSONReportsRegressionDirectionAndThreshold(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base.json")
+	current := filepath.Join(dir, "current.json")
+	if err := os.WriteFile(base, []byte(`{"p95_latency_ms":100,"p99_latency_ms":200,"requests_per_second":100,"total_requests":100,"failed_requests":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(current, []byte(`{"p95_latency_ms":124,"p99_latency_ms":220,"requests_per_second":80,"total_requests":100,"failed_requests":2}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	results, err := CompareJSON(base, current, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 4 || !results[0].Worse || results[0].ChangePercent < 23.9 || results[0].ChangePercent > 24.1 || !results[2].Worse || !results[3].Worse {
+		t.Fatalf("comparison = %#v", results)
+	}
+}
