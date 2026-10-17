@@ -37,6 +37,7 @@ func (e *Engine) doRequest(ctx context.Context, workerID int) models.RequestResu
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return models.RequestResult{
+			Endpoint:  metrics.NormalizeEndpoint(req.URL.String()),
 			Latency:   time.Since(start),
 			Timestamp: start,
 			Err:       err,
@@ -53,6 +54,7 @@ func (e *Engine) doRequest(ctx context.Context, workerID int) models.RequestResu
 	resultErr := readErr
 
 	return models.RequestResult{
+		Endpoint:   metrics.NormalizeEndpoint(req.URL.String()),
 		StatusCode: resp.StatusCode,
 		Latency:    latency,
 		Timestamp:  start,
