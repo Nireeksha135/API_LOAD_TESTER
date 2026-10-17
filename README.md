@@ -48,6 +48,8 @@ The project focuses on **concurrency, worker pools, HTTP networking, thread-safe
 - HTTP status code breakdown
 - Live terminal dashboard
 - CSV and JSON export
+- Normalized per-endpoint request, error-rate, and latency breakdowns
+- JSON report comparison for P95/P99 latency, request throughput, and error-rate regressions
 - Graceful shutdown
 - Race-condition testing
 
@@ -137,6 +139,16 @@ Threshold failures leave the final report and requested exports available, then 
 api-load-tester -url https://api.example.com/health -n 1000 -c 50 \
     -max-p95 200ms -max-error-rate 1% -json summary.json
 ```
+
+### Compare Performance Reports
+
+Save JSON reports from the baseline and current revisions, then compare them. Percentage changes are relative to the baseline; latency and error-rate increases and throughput decreases are treated as regressions. The command exits with status 1 when any regression exceeds `-max-regression` (default 10%). These metrics are estimates, not guarantees, and small changes can be affected by run-to-run variation.
+
+```bash
+api-load-tester compare -baseline baseline.json -current current.json -max-regression 10%
+```
+
+JSON reports and the terminal summary include endpoint metrics, sorted by descending P95 latency. Query strings are removed, and numeric or UUID path segments are grouped as `:id` to avoid splitting dynamic routes into many endpoints.
 
 ### Arrival Rate and Ramp
 
