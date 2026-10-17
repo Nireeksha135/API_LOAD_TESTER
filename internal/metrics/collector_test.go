@@ -11,6 +11,28 @@ import (
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
 )
 
+func TestEndpointNormalization(t *testing.T) {
+	got := NormalizeEndpoint("https://api.example.com/products/123?token=secret")
+	if got != "https://api.example.com/products/:id" {
+		t.Fatalf("NormalizeEndpoint() = %q", got)
+	}
+}
+
+func TestEndpointMetricsAreSortedByP95(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 1)
+	c.Start()
+	c.Record(models.RequestResult{Endpoint: "http://example.com/fast", Latency: time.Millisecond, Success: true})
+	c.Record(models.RequestResult{Endpoint: "http://example.com/slow", Latency: 20 * time.Millisecond, Success: false})
+	c.Stop()
+	summary := c.Summary()
+	if len(summary.Endpoints) != 2 || summary.Endpoints[0].Endpoint != "http://example.com/slow" {
+		t.Fatalf("endpoint order = %#v", summary.Endpoints)
+	}
+	if summary.Endpoints[0].Requests != 1 || summary.Endpoints[0].Errors != 1 || summary.Endpoints[0].ErrorRate != 1 {
+		t.Fatalf("endpoint error metrics = %#v", summary.Endpoints[0])
+	}
+}
+
 func TestPercentileBasic(t *testing.T) {
 	latencies := []time.Duration{
 		10 * time.Millisecond,
