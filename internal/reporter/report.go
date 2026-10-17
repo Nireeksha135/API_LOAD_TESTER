@@ -72,6 +72,13 @@ func PrintSummary(out io.Writer, summary models.Summary) {
 	fmt.Fprintf(out, "  P99.9:           %s\n", utils.FormatDuration(summary.P999))
 	fmt.Fprintf(out, "  Max:             %s\n", utils.FormatDuration(summary.MaxLatency))
 	fmt.Fprintln(out, subDivider)
+	if len(summary.Endpoints) > 0 {
+		fmt.Fprintln(out, "Endpoint Performance (slowest P95 first):")
+		for _, endpoint := range summary.Endpoints {
+			fmt.Fprintf(out, "  %s\n    Requests: %d  Errors: %d (%.2f%%)  Mean: %s  P95: %s  P99: %s\n", endpoint.Endpoint, endpoint.Requests, endpoint.Errors, endpoint.ErrorRate*100, utils.FormatDuration(endpoint.MeanLatency), utils.FormatDuration(endpoint.P95), utils.FormatDuration(endpoint.P99))
+		}
+		fmt.Fprintln(out, subDivider)
+	}
 
 	fmt.Fprintln(out, "Status Codes:")
 	codes := make([]int, 0, len(summary.StatusCodeCounts))
