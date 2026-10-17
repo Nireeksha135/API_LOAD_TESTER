@@ -45,6 +45,9 @@ type RequestResult struct {
 	// WorkerID identifies which worker goroutine produced this result.
 	// Useful for debugging and verbose logging.
 	WorkerID int
+
+	// Endpoint is the normalized scheme, host, and path measured for this request.
+	Endpoint string
 }
 
 // Summary is the final aggregated set of statistics computed from all
@@ -143,6 +146,19 @@ type Summary struct {
 
 	// TimeSeries contains per-second throughput, latency, and error points when enabled.
 	TimeSeries []TimeSeriesPoint `json:"time_series,omitempty"`
+
+	Endpoints []EndpointSummary `json:"endpoints,omitempty"`
+}
+
+// EndpointSummary contains aggregated request metrics for one normalized endpoint.
+type EndpointSummary struct {
+	Endpoint    string        `json:"endpoint"`
+	Requests    int64         `json:"requests"`
+	Errors      int64         `json:"errors"`
+	ErrorRate   float64       `json:"error_rate"`
+	MeanLatency time.Duration `json:"mean_latency_ns"`
+	P95         time.Duration `json:"p95_latency_ns"`
+	P99         time.Duration `json:"p99_latency_ns"`
 }
 
 type TimeSeriesPoint struct {
