@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-	
+
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
 )
@@ -277,10 +277,11 @@ func TestParseArgsBodyFile(t *testing.T) {
 }
 
 func TestParseArgsBodyFileMissing(t *testing.T) {
+	missingPath := filepath.Join(t.TempDir(), "missing-body.json")
 	var errOut bytes.Buffer
 	_, err := ParseArgs([]string{
 		"-url", "https://api.example.com",
-		"-body-file", "/nonexistent/path/body.json",
+		"-body-file", missingPath,
 	}, &errOut)
 	if err == nil {
 		t.Error("ParseArgs() with missing body file: expected error, got nil")
@@ -330,6 +331,9 @@ func TestParseArgsClampsConcurrencyAndAllowsGetBody(t *testing.T) {
 	}
 	if opts.Config.Concurrency != 2 {
 		t.Errorf("Concurrency = %d, want clamped value 2", opts.Config.Concurrency)
+	}
+	if opts.Config.Body != "payload" {
+		t.Errorf("Body = %q, want GET request body %q", opts.Config.Body, "payload")
 	}
 }
 
