@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
+	
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/models"
 )
@@ -551,5 +551,22 @@ func TestRunEndToEndWithExports(t *testing.T) {
 	}
 	if _, err := os.Stat(timeSeriesCSVPath); err != nil {
 		t.Errorf("expected time-series CSV at %s, got error: %v", timeSeriesCSVPath, err)
+	}
+}
+
+func TestCompareSubcommandReturnsFailureOnRegression(t *testing.T) {
+	dir := t.TempDir()
+	baseline := filepath.Join(dir, "base.json")
+	current := filepath.Join(dir, "current.json")
+	if err := os.WriteFile(baseline, []byte(`{"p95_latency_ms":100,"p99_latency_ms":100,"requests_per_second":100,"total_requests":100,"failed_requests":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(current, []byte(`{"p95_latency_ms":130,"p99_latency_ms":100,"requests_per_second":100,"total_requests":100,"failed_requests":2}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	err := Compare([]string{"-baseline", baseline, "-current", current, "-max-regression", "10%"}, &out, &errOut)
+	if err == nil || !strings.Contains(out.String(), "REGRESSION") {
+		t.Fatalf("Compare() err=%v output=%s", err, out.String())
 	}
 }
