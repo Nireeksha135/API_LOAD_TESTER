@@ -41,6 +41,7 @@ func TestExportJSON(t *testing.T) {
 		TotalBytesRead:            2048000,
 		ThroughputBytesPerSecond:  204800,
 		Errors:                    map[string]int64{"timeout": 4},
+		Endpoints:                 []models.EndpointSummary{{Endpoint: "https://api.example.com/users/:id", Requests: 10, Errors: 1, CancelledRequests: 2, ErrorRate: 0.125, MeanLatency: time.Millisecond, P95: 2 * time.Millisecond, P99: 3 * time.Millisecond}},
 		TimeSeries: []models.TimeSeriesPoint{{
 			Second: 1, Requests: 200, RPS: 200, P95: 120 * time.Millisecond, Errors: 3,
 		}},
@@ -83,6 +84,14 @@ func TestExportJSON(t *testing.T) {
 	}
 	if parsed["p99_latency_ms"].(float64) != 400 {
 		t.Errorf("p99_latency_ms = %v, want 400", parsed["p99_latency_ms"])
+	}
+	endpoints, ok := parsed["endpoints"].([]interface{})
+	if !ok || len(endpoints) != 1 {
+		t.Fatalf("endpoints = %v", parsed["endpoints"])
+	}
+	endpoint := endpoints[0].(map[string]interface{})
+	if endpoint["cancelled_requests"] != float64(2) || endpoint["error_rate"] != 0.125 {
+		t.Errorf("endpoint JSON metrics = %v", endpoint)
 	}
 	series, ok := parsed["time_series"].([]interface{})
 	if !ok || len(series) != 1 || series[0].(map[string]interface{})["p95_latency_ms"] != float64(120) {
@@ -158,7 +167,60 @@ func TestCompareJSONReportsRegressionDirectionAndThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 4 || !results[0].Worse || results[0].ChangePercent < 23.9 || results[0].ChangePercent > 24.1 || !results[2].Worse || !results[3].Worse {
+	if len(results) != 4 || !results[0].Worse || !results[0].ExceedsLimit || results[0].ChangePercent < 23.9 || results[0].ChangePercent > 24.1 || !results[2].Worse || !results[2].ExceedsLimit || !results[3].Worse || !results[3].ExceedsLimit {
 		t.Fatalf("comparison = %#v", results)
+	}
+}
+
+func TestCompareJSONZeroBaselineImprovementAndThroughputOnlyRegression(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base.json")
+	current := filepath.Join(dir, "current.json")
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(base, `{"target_url":"https://old.example","target_rps":100,"concurrency":10,"p95_latency_ms":0,"p99_latency_ms":100,"requests_per_second":100,"total_requests":10,"failed_requests":0}`)
+	write(current, `{"target_url":"https://new.example","target_rps":80,"concurrency":20,"p95_latency_ms":4,"p99_latency_ms":50,"requests_per_second":75,"total_requests":10,"failed_requests":1}`)
+	results, warnings, err := CompareJSONDetailed(base, current, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 3 {
+		t.Fatalf("warnings = %v, want target, target RPS and concurrency warnings", warnings)
+	}
+	if !results[0].Worse || !results[0].ExceedsLimit {
+		t.Errorf("zero baseline latency should be a limit-breaking regression: %#v", results[0])
+	}
+	if results[1].Worse || results[1].ExceedsLimit {
+		t.Errorf("latency improvement marked as regression: %#v", results[1])
+	}
+	if !results[2].ExceedsLimit {
+		t.Errorf("throughput-only regression missed: %#v", results[2])
+	}
+}
+
+func TestCompareJSONAllImprovements(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base.json")
+	current := filepath.Join(dir, "current.json")
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(base, `{"p95_latency_ms":100,"p99_latency_ms":200,"requests_per_second":100,"total_requests":100,"failed_requests":10}`)
+	write(current, `{"p95_latency_ms":80,"p99_latency_ms":150,"requests_per_second":120,"total_requests":100,"failed_requests":5}`)
+	results, err := CompareJSON(base, current, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, result := range results {
+		if result.Worse || result.ExceedsLimit {
+			t.Errorf("improvement reported as regression: %#v", result)
+		}
 	}
 }
