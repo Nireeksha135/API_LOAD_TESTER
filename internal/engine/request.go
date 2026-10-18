@@ -12,11 +12,13 @@ import (
 	"strings"
 
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
+	"github.com/Nireeksha135/API_LOAD_TESTER/internal/endpoint"
 )
 
 type requestTemplate struct {
 	method             string
 	urls               []string
+	endpoints          []string // normalized endpoint label per URL, same order as urls
 	headers            map[string]string
 	contentType        string
 	bodyBytes          []byte
@@ -49,6 +51,7 @@ func newRequestTemplate(cfg *config.Config) *requestTemplate {
 	if len(template.urls) == 0 {
 		template.urls = []string{cfg.TargetURL}
 	}
+	template.endpoints = endpoint.Labels(template.urls)
 	for _, targetURL := range template.urls {
 		template.dynamicURL = template.dynamicURL || strings.Contains(targetURL, "{{")
 		template.needsCounter = template.needsCounter || strings.Contains(targetURL, "{{counter}}")
@@ -72,6 +75,20 @@ func (t *requestTemplate) needsRequestID() bool {
 	return len(t.urls) > 1 || t.needsCounter
 }
 
+// urlIndex returns which configured URL a request with the given ID targets.
+// IDs start at 1; 0 means no ID was allocated and selects the first URL.
+func (t *requestTemplate) urlIndex(counter uint64) int {
+	if counter == 0 {
+		counter = 1
+	}
+	return int((counter - 1) % uint64(len(t.urls)))
+}
+
+// endpointFor returns the normalized endpoint label for the request with the given ID.
+func (t *requestTemplate) endpointFor(counter uint64) string {
+	return t.endpoints[t.urlIndex(counter)]
+}
+
 func (t *requestTemplate) newRequest(ctx context.Context, counter uint64) (*http.Request, error) {
 	if counter == 0 {
 		counter = 1
@@ -80,7 +97,7 @@ func (t *requestTemplate) newRequest(ctx context.Context, counter uint64) (*http
 	if t.needsCounter {
 		counterValue = strconv.FormatUint(counter, 10)
 	}
-	targetURL := t.urls[(counter-1)%uint64(len(t.urls))]
+	targetURL := t.urls[t.urlIndex(counter)]
 	bodyBytes := t.bodyBytes
 	contentType := t.contentType
 	var randomValue string

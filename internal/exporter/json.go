@@ -45,6 +45,21 @@ type jsonSummary struct {
 	ThroughputBytesPerSecond  float64               `json:"throughput_bytes_per_second"`
 	Errors                    map[string]int64      `json:"errors,omitempty"`
 	TimeSeries                []jsonTimeSeriesPoint `json:"time_series,omitempty"`
+	Endpoints                 []jsonEndpoint        `json:"endpoints,omitempty"`
+}
+
+// jsonEndpoint is the per-endpoint breakdown; latencies are in milliseconds
+// like every other duration in the report.
+type jsonEndpoint struct {
+	Endpoint          string  `json:"endpoint"`
+	Requests          int64   `json:"requests"`
+	FailedRequests    int64   `json:"failed_requests"`
+	CancelledRequests int64   `json:"cancelled_requests"`
+	ErrorRate         float64 `json:"error_rate"`
+	MeanLatencyMS     float64 `json:"mean_latency_ms"`
+	P50LatencyMS      float64 `json:"p50_latency_ms"`
+	P95LatencyMS      float64 `json:"p95_latency_ms"`
+	P99LatencyMS      float64 `json:"p99_latency_ms"`
 }
 
 type jsonTimeSeriesPoint struct {
@@ -76,6 +91,21 @@ func ExportJSON(path string, summary models.Summary) error {
 			P95LatencyMS: durationToMS(point.P95),
 			Errors:       point.Errors,
 		}
+	}
+
+	var endpoints []jsonEndpoint
+	for _, e := range summary.Endpoints {
+		endpoints = append(endpoints, jsonEndpoint{
+			Endpoint:          e.Endpoint,
+			Requests:          e.Requests,
+			FailedRequests:    e.Failed,
+			CancelledRequests: e.Cancelled,
+			ErrorRate:         e.ErrorRate(),
+			MeanLatencyMS:     durationToMS(e.MeanLatency),
+			P50LatencyMS:      durationToMS(e.P50),
+			P95LatencyMS:      durationToMS(e.P95),
+			P99LatencyMS:      durationToMS(e.P99),
+		})
 	}
 
 	out := jsonSummary{
@@ -110,6 +140,7 @@ func ExportJSON(path string, summary models.Summary) error {
 		ThroughputBytesPerSecond:  summary.ThroughputBytesPerSecond,
 		Errors:                    summary.Errors,
 		TimeSeries:                timeSeries,
+		Endpoints:                 endpoints,
 	}
 
 	data, err := json.MarshalIndent(out, "", "  ")

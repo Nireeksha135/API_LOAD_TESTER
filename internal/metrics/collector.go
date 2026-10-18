@@ -69,6 +69,7 @@ type Collector struct {
 	keepRaw    bool
 	rawResults []models.RequestResult
 	timeSeries *timeSeriesStore
+	endpoints  *endpointStore
 }
 
 // NewCollector creates a new Collector for a run against targetURL using the given HTTP method and concurrency level.
@@ -124,6 +125,7 @@ func (c *Collector) NewWorkerCollectors(count int) []*Collector {
 		worker := NewCollector(c.targetURL, c.method, c.concurrency, opts...)
 		worker.startTime = c.startTime
 		worker.timeSeries = c.timeSeries
+		worker.endpoints = c.endpoints
 		workers[i] = worker
 	}
 	c.workers = append(c.workers, workers...)
@@ -179,6 +181,9 @@ func (c *Collector) Record(result models.RequestResult) {
 		}
 		second := int64(elapsed / time.Second)
 		c.timeSeries.record(second, result)
+	}
+	if c.endpoints != nil && result.Endpoint != "" {
+		c.endpoints.record(result)
 	}
 	observer := c.resultObserver
 	c.mu.Unlock()
@@ -258,6 +263,7 @@ type aggregate struct {
 	errorCounts       map[string]int64
 	latencies         *hdrhistogram.Histogram
 	timeSeries        map[int64]*secondBucket
+	endpoints         []models.EndpointSummary
 }
 
 func (c *Collector) aggregateLocked(includeHistogram bool) aggregate {
@@ -276,6 +282,9 @@ func (c *Collector) aggregateLocked(includeHistogram bool) aggregate {
 	}
 	if includeHistogram && c.timeSeries != nil {
 		a.timeSeries = c.timeSeries.snapshot()
+	}
+	if includeHistogram && c.endpoints != nil {
+		a.endpoints = c.endpoints.snapshot()
 	}
 	return a
 }
@@ -422,5 +431,6 @@ func (c *Collector) Summary() models.Summary {
 		ThroughputBytesPerSecond: throughputBytesPerSecond,
 		Errors:                   data.errorCounts,
 		TimeSeries:               timeSeries,
+		Endpoints:                data.endpoints,
 	}
 }

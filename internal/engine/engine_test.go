@@ -684,3 +684,85 @@ func TestNewRejectsNilCollector(t *testing.T) {
 		t.Error("New() with nil collector: expected error, got nil")
 	}
 }
+
+func TestRequestTemplateMapsRequestIDsToEndpointLabels(t *testing.T) {
+	cfg := newTestConfig("http://example.com/login")
+	cfg.TargetURLs = []string{
+		"http://example.com/login",
+		"http://example.com/orders/{{counter}}?expand=items",
+		"http://example.com/orders/42",
+	}
+	template := newRequestTemplate(cfg)
+
+	want := map[uint64]string{
+		0: "/login", // no ID allocated: first URL
+		1: "/login",
+		2: "/orders/{id}",
+		3: "/orders/{id}",
+		4: "/login", // wraps around
+	}
+	for id, label := range want {
+		if got := template.endpointFor(id); got != label {
+			t.Errorf("endpointFor(%d) = %q, want %q", id, got, label)
+		}
+	}
+}
+
+func TestEngineReportsPerEndpointStatsSlowestFirst(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/checkout"):
+			time.Sleep(40 * time.Millisecond)
+			w.WriteHeader(http.StatusInternalServerError)
+		case strings.HasPrefix(r.URL.Path, "/products"):
+			time.Sleep(15 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	cfg := newTestConfig(server.URL + "/login")
+	cfg.TargetURLs = []string{
+		server.URL + "/login",
+		server.URL + "/login?next=/home", // same endpoint as /login
+		server.URL + "/products/{{counter}}",
+		server.URL + "/checkout",
+	}
+	cfg.TotalRequests = 80
+	cfg.Concurrency = 4
+	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency, metrics.WithEndpointStats())
+	eng, err := New(cfg, collector, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	summary, err := eng.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if len(summary.Endpoints) != 3 {
+		t.Fatalf("got %d endpoints, want 3 (query strings and ids must not create new endpoints): %+v", len(summary.Endpoints), summary.Endpoints)
+	}
+	wantOrder := []string{"/checkout", "/products/{id}", "/login"}
+	wantRequests := map[string]int64{"/checkout": 20, "/products/{id}": 20, "/login": 40}
+	for i, label := range wantOrder {
+		got := summary.Endpoints[i]
+		if got.Endpoint != label {
+			t.Fatalf("endpoint[%d] = %q, want %q (slowest first): %+v", i, got.Endpoint, label, summary.Endpoints)
+		}
+		if got.Requests != wantRequests[label] {
+			t.Errorf("%s requests = %d, want %d", label, got.Requests, wantRequests[label])
+		}
+	}
+	if checkout := summary.Endpoints[0]; checkout.Failed != 20 || checkout.ErrorRate() != 1 {
+		t.Errorf("checkout failed = %d (error rate %v), want all 20 requests failed", checkout.Failed, checkout.ErrorRate())
+	}
+	if login := summary.Endpoints[2]; login.Failed != 0 {
+		t.Errorf("login failed = %d, want 0", login.Failed)
+	}
+	if summary.Endpoints[0].P95 < 35*time.Millisecond {
+		t.Errorf("checkout P95 = %v, want at least the 40ms server delay (minus precision)", summary.Endpoints[0].P95)
+	}
+}

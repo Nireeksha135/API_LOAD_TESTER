@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
+	"github.com/Nireeksha135/API_LOAD_TESTER/internal/endpoint"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/engine"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/exporter"
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/metrics"
@@ -44,6 +45,11 @@ func Run(ctx context.Context, cfg *config.Config, stdout *os.File, stderr *os.Fi
 	}
 	if cfg.OutputJSON != "" || cfg.OutputTimeSeriesCSV != "" {
 		collectorOpts = append(collectorOpts, metrics.WithTimeSeries())
+	}
+	// A per-endpoint breakdown only adds information when the test can hit
+	// more than one normalized endpoint.
+	if len(cfg.TargetURLs) > 1 && len(endpoint.Distinct(endpoint.Labels(cfg.TargetURLs))) > 1 {
+		collectorOpts = append(collectorOpts, metrics.WithEndpointStats())
 	}
 	collector := metrics.NewCollector(cfg.TargetURL, cfg.Method, cfg.Concurrency, collectorOpts...)
 

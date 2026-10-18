@@ -91,6 +91,8 @@ func PrintSummary(out io.Writer, summary models.Summary) {
 		fmt.Fprintf(out, "  %-18s %-8d (%.1f%%)\n", label, summary.StatusCodeCounts[code], pct)
 	}
 
+	printEndpoints(out, summary, subDivider)
+
 	if len(summary.Errors) > 0 {
 		fmt.Fprintln(out, subDivider)
 		fmt.Fprintln(out, "Errors observed:")
@@ -116,4 +118,34 @@ func centerText(text string, width int) string {
 	}
 	padding := (width - len(text)) / 2
 	return strings.Repeat(" ", padding) + text
+}
+
+// printEndpoints renders the per-endpoint breakdown, slowest endpoint
+// first (the order the metrics layer already provides). It prints nothing
+// unless the run tracked more than one endpoint.
+func printEndpoints(out io.Writer, summary models.Summary, subDivider string) {
+	if len(summary.Endpoints) < 2 {
+		return
+	}
+	fmt.Fprintln(out, subDivider)
+	fmt.Fprintln(out, "Endpoints (slowest first):")
+	width := len("Endpoint")
+	for _, e := range summary.Endpoints {
+		if len(e.Endpoint) > width {
+			width = len(e.Endpoint)
+		}
+	}
+	const maxWidth = 28
+	if width > maxWidth {
+		width = maxWidth
+	}
+	fmt.Fprintf(out, "  %-*s %8s %7s %9s %9s %9s\n", width, "Endpoint", "Reqs", "Err%", "Avg", "P95", "P99")
+	for _, e := range summary.Endpoints {
+		name := e.Endpoint
+		if len(name) > width {
+			name = name[:width-3] + "..."
+		}
+		fmt.Fprintf(out, "  %-*s %8d %6.1f%% %9s %9s %9s\n", width, name, e.Requests, e.ErrorRate()*100,
+			utils.FormatDuration(e.MeanLatency), utils.FormatDuration(e.P95), utils.FormatDuration(e.P99))
+	}
 }

@@ -45,6 +45,11 @@ type RequestResult struct {
 	// WorkerID identifies which worker goroutine produced this result.
 	// Useful for debugging and verbose logging.
 	WorkerID int
+
+	// Endpoint is the normalized endpoint label of the URL this request
+	// targeted (for example "/orders/{id}"). It is derived from the configured
+	// URLs, so its cardinality is bounded by the number of configured URLs.
+	Endpoint string
 }
 
 // Summary is the final aggregated set of statistics computed from all
@@ -143,6 +148,44 @@ type Summary struct {
 
 	// TimeSeries contains per-second throughput, latency, and error points when enabled.
 	TimeSeries []TimeSeriesPoint `json:"time_series,omitempty"`
+
+	// Endpoints holds per-endpoint statistics, sorted from slowest to fastest
+	// by P95 latency. It is only populated when the test targets more than one
+	// distinct endpoint.
+	Endpoints []EndpointSummary `json:"endpoints,omitempty"`
+}
+
+// EndpointSummary aggregates the results of every request sent to one
+// normalized endpoint.
+type EndpointSummary struct {
+	// Endpoint is the normalized endpoint label, for example "/orders/{id}".
+	Endpoint string `json:"endpoint"`
+
+	// Requests is the number of requests recorded for the endpoint, including
+	// failed and cancelled ones.
+	Requests int64 `json:"requests"`
+
+	// Failed is the number of non-cancelled requests that did not succeed.
+	Failed int64 `json:"failed_requests"`
+
+	// Cancelled is the number of requests interrupted by run cancellation.
+	Cancelled int64 `json:"cancelled_requests"`
+
+	// MeanLatency, P50, P95 and P99 describe the endpoint's latency distribution.
+	MeanLatency time.Duration `json:"mean_latency_ns"`
+	P50         time.Duration `json:"p50_latency_ns"`
+	P95         time.Duration `json:"p95_latency_ns"`
+	P99         time.Duration `json:"p99_latency_ns"`
+}
+
+// ErrorRate returns Failed/Requests as a fraction between 0 and 1.
+// Arrivals dropped by the rate scheduler never reach an endpoint, so they are
+// not part of this figure.
+func (e EndpointSummary) ErrorRate() float64 {
+	if e.Requests == 0 {
+		return 0
+	}
+	return float64(e.Failed) / float64(e.Requests)
 }
 
 type TimeSeriesPoint struct {

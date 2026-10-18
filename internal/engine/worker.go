@@ -23,6 +23,7 @@ func (e *Engine) doRequest(ctx context.Context, workerID int) models.RequestResu
 	if e.template.needsRequestID() {
 		requestID = e.requestCounter.Add(1)
 	}
+	endpoint := e.template.endpointFor(requestID)
 	req, err := e.template.newRequest(ctx, requestID)
 	if err != nil {
 		return models.RequestResult{
@@ -31,6 +32,7 @@ func (e *Engine) doRequest(ctx context.Context, workerID int) models.RequestResu
 			Err:       err,
 			Success:   false,
 			WorkerID:  workerID,
+			Endpoint:  endpoint,
 		}
 	}
 
@@ -42,6 +44,7 @@ func (e *Engine) doRequest(ctx context.Context, workerID int) models.RequestResu
 			Err:       err,
 			Success:   false,
 			WorkerID:  workerID,
+			Endpoint:  endpoint,
 		}
 	}
 	defer resp.Body.Close()
@@ -60,6 +63,7 @@ func (e *Engine) doRequest(ctx context.Context, workerID int) models.RequestResu
 		Success:    success,
 		Err:        resultErr,
 		WorkerID:   workerID,
+		Endpoint:   endpoint,
 	}
 }
 
