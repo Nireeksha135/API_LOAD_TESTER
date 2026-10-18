@@ -259,6 +259,7 @@ const usageText = `api-load-tester - a concurrent HTTP API load testing tool
 
 USAGE:
   api-load-tester -url <target> [flags]
+  api-load-tester compare -baseline <report.json> -current <report.json> [flags]
 
 EXAMPLES:
   # 1000 GET requests, 50 concurrent workers
@@ -275,6 +276,9 @@ EXAMPLES:
   # Export both a per-request CSV and an aggregated JSON summary
   api-load-tester -url https://api.example.com/health -n 5000 -c 200 \
       -csv results.csv -json summary.json
+
+  # Compare reports; an optional limit makes regressions fail the command
+  api-load-tester compare -baseline before.json -current after.json -max-regression 10%
 
   # Key options: -rps, -warmup, -ramp-up, -max-p95, -max-error-rate,
   #              -csv, -json, -time-series-csv, -config, -version
