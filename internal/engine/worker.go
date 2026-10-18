@@ -24,8 +24,10 @@ func (e *Engine) doRequest(ctx context.Context, workerID int) models.RequestResu
 		requestID = e.requestCounter.Add(1)
 	}
 	req, err := e.template.newRequest(ctx, requestID)
+	endpoint := e.template.endpoint(requestID)
 	if err != nil {
 		return models.RequestResult{
+			Endpoint:  endpoint,
 			Latency:   time.Since(start),
 			Timestamp: start,
 			Err:       err,
@@ -37,7 +39,7 @@ func (e *Engine) doRequest(ctx context.Context, workerID int) models.RequestResu
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return models.RequestResult{
-			Endpoint:  metrics.NormalizeEndpoint(req.URL.String()),
+			Endpoint:  endpoint,
 			Latency:   time.Since(start),
 			Timestamp: start,
 			Err:       err,
@@ -54,7 +56,7 @@ func (e *Engine) doRequest(ctx context.Context, workerID int) models.RequestResu
 	resultErr := readErr
 
 	return models.RequestResult{
-		Endpoint:   metrics.NormalizeEndpoint(req.URL.String()),
+		Endpoint:   endpoint,
 		StatusCode: resp.StatusCode,
 		Latency:    latency,
 		Timestamp:  start,
