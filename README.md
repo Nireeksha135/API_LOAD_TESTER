@@ -19,6 +19,7 @@ The project focuses on **concurrency, worker pools, HTTP networking, thread-safe
 ![Concurrency](https://img.shields.io/badge/CONCURRENCY-7B61FF?style=for-the-badge)
 ![CLI](https://img.shields.io/badge/CLI-111111?style=for-the-badge)
 ![Testing](https://img.shields.io/badge/TESTING-2EA44F?style=for-the-badge)
+
 ---
 
 ## Features
@@ -141,13 +142,13 @@ api-load-tester -url https://api.example.com/health -n 1000 -c 50 \
 
 ### Compare Performance Reports
 
-Save JSON reports from the baseline and current revisions, then compare them. Percentage changes are relative to the baseline; latency and error-rate increases and throughput decreases are treated as regressions. The command exits with status 1 when any regression exceeds `-max-regression` (default 10%). These metrics are estimates, not guarantees, and small changes can be affected by run-to-run variation.
+Save JSON reports from the baseline and current revisions, then compare them. Percentage changes are relative to the baseline; latency and error-rate increases and throughput decreases are treated as regressions. The comparison reports regressions but only exits with status 1 when a configured `-max-regression` limit is exceeded. Usage and report errors exit with status 2. These metrics are estimates, not guarantees, and small changes can be affected by run-to-run variation.
 
 ```bash
 api-load-tester compare -baseline baseline.json -current current.json -max-regression 10%
 ```
 
-JSON reports and the terminal summary include endpoint metrics, sorted by descending P95 latency. Query strings are removed, and numeric or UUID path segments are grouped as `:id` to avoid splitting dynamic routes into many endpoints.
+JSON reports and the terminal summary include endpoint metrics, sorted by descending P95 latency. Query strings and trailing slashes are normalized, known dynamic IDs and `{{counter}}`/`{{random}}` template segments are grouped as `:id`, and at most 32 endpoint buckets are tracked (31 named routes plus the shared `(other)` bucket). Endpoint request totals include cancellations, which are shown separately; error rates exclude cancelled requests.
 
 ### Arrival Rate and Ramp
 
