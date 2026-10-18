@@ -148,7 +148,9 @@ Save JSON reports from the baseline and current revisions, then compare them. Pe
 api-load-tester compare -baseline baseline.json -current current.json -max-regression 10%
 ```
 
-JSON reports and the terminal summary include endpoint metrics, sorted by descending P95 latency. Query strings and trailing slashes are normalized, known dynamic IDs and `{{counter}}`/`{{random}}` template segments are grouped as `:id`, and at most 32 endpoint buckets are tracked (31 named routes plus the shared `(other)` bucket). Endpoint request totals include cancellations, which are shown separately; error rates exclude cancelled requests.
+JSON reports and the terminal summary include endpoint metrics, sorted by descending P95 latency. Query strings and trailing slashes are normalized; numeric, UUID, 24-hex, and mixed letter-and-digit IDs and `{{counter}}`/`{{random}}` template segments are grouped as `:id`. Route labels are computed once per configured URL, and at most 32 endpoint buckets are tracked (31 named routes plus the shared `(other)` bucket). Endpoint request totals include cancellations, which are shown separately; error rates exclude cancelled requests.
+
+When a baseline error rate is zero, comparison reports the increase in percentage points so a newly observed error does not become an infinite relative change.
 
 ### Arrival Rate and Ramp
 
