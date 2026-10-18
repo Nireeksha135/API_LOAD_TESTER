@@ -49,13 +49,14 @@ type jsonSummary struct {
 }
 
 type jsonEndpointSummary struct {
-	Endpoint      string  `json:"endpoint"`
-	Requests      int64   `json:"requests"`
-	Errors        int64   `json:"errors"`
-	ErrorRate     float64 `json:"error_rate"`
-	MeanLatencyMS float64 `json:"mean_latency_ms"`
-	P95LatencyMS  float64 `json:"p95_latency_ms"`
-	P99LatencyMS  float64 `json:"p99_latency_ms"`
+	Endpoint          string  `json:"endpoint"`
+	Requests          int64   `json:"requests"`
+	Errors            int64   `json:"errors"`
+	CancelledRequests int64   `json:"cancelled_requests"`
+	ErrorRate         float64 `json:"error_rate"`
+	MeanLatencyMS     float64 `json:"mean_latency_ms"`
+	P95LatencyMS      float64 `json:"p95_latency_ms"`
+	P99LatencyMS      float64 `json:"p99_latency_ms"`
 }
 
 type jsonTimeSeriesPoint struct {
@@ -123,7 +124,7 @@ func ExportJSON(path string, summary models.Summary) error {
 		TimeSeries:                timeSeries,
 	}
 	for _, endpoint := range summary.Endpoints {
-		out.Endpoints = append(out.Endpoints, jsonEndpointSummary{Endpoint: endpoint.Endpoint, Requests: endpoint.Requests, Errors: endpoint.Errors, ErrorRate: endpoint.ErrorRate, MeanLatencyMS: durationToMS(endpoint.MeanLatency), P95LatencyMS: durationToMS(endpoint.P95), P99LatencyMS: durationToMS(endpoint.P99)})
+		out.Endpoints = append(out.Endpoints, jsonEndpointSummary{Endpoint: endpoint.Endpoint, Requests: endpoint.Requests, Errors: endpoint.Errors, CancelledRequests: endpoint.CancelledRequests, ErrorRate: endpoint.ErrorRate, MeanLatencyMS: durationToMS(endpoint.MeanLatency), P95LatencyMS: durationToMS(endpoint.P95), P99LatencyMS: durationToMS(endpoint.P99)})
 	}
 
 	data, err := json.MarshalIndent(out, "", "  ")
