@@ -12,9 +12,58 @@ import (
 )
 
 func TestEndpointNormalization(t *testing.T) {
-	got := NormalizeEndpoint("https://api.example.com/products/123?token=secret")
-	if got != "https://api.example.com/products/:id" {
-		t.Fatalf("NormalizeEndpoint() = %q", got)
+	cases := map[string]string{
+		"https://api.example.com/products/123?token=secret":      "https://api.example.com/products/:id",
+		"https://api.example.com/users/alice":                    "https://api.example.com/users/:id",
+		"https://api.example.com/o/12ab34":                       "https://api.example.com/o/:id",
+		"https://api.example.com/users/5f1d00000000000000007a7b": "https://api.example.com/users/:id",
+		"https://api.example.com/orders/{{random}}/":             "https://api.example.com/orders/:id",
+		"https://api.example.com/a/":                             "https://api.example.com/a",
+		"/status/health":                                         "/status/health",
+	}
+	for input, want := range cases {
+		if got := NormalizeEndpoint(input); got != want {
+			t.Errorf("NormalizeEndpoint(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestEndpointCountIsBounded(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 1)
+	for i := 0; i < 100; i++ {
+		c.Record(models.RequestResult{Endpoint: fmt.Sprintf("http://example.com/endpoint-%c%c", 'a'+i/26, 'a'+i%26), Latency: time.Millisecond, Success: true})
+	}
+	got := c.Summary().Endpoints
+	if len(got) > maxEndpointCount+1 {
+		t.Fatalf("got %d endpoint buckets, maximum is %d", len(got), maxEndpointCount+1)
+	}
+	foundOther := false
+	for _, endpoint := range got {
+		foundOther = foundOther || endpoint.Endpoint == endpointOther
+	}
+	if !foundOther {
+		t.Fatalf("overflow bucket missing: %#v", got)
+	}
+}
+
+func TestEndpointCancelledRequestsAreShownAndExcludedFromErrorRate(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 1)
+	c.Record(models.RequestResult{Endpoint: "http://example.com/orders/1", Latency: time.Millisecond, Success: true})
+	c.Record(models.RequestResult{Endpoint: "http://example.com/orders/2", Latency: time.Millisecond, Cancelled: true})
+	endpoint := c.Summary().Endpoints[0]
+	if endpoint.Requests != 2 || endpoint.CancelledRequests != 1 || endpoint.Errors != 0 || endpoint.ErrorRate != 0 {
+		t.Fatalf("endpoint metrics = %#v", endpoint)
+	}
+}
+
+func TestSnapshotSkipsEndpointHistogramSummary(t *testing.T) {
+	c := NewCollector("http://example.com", "GET", 1)
+	c.Record(models.RequestResult{Endpoint: "http://example.com/a", Latency: time.Millisecond, Success: true})
+	c.mu.Lock()
+	data := c.aggregateLocked(false)
+	c.mu.Unlock()
+	if data.endpoints != nil {
+		t.Fatalf("snapshot aggregation retained endpoint summaries: %#v", data.endpoints)
 	}
 }
 
@@ -30,6 +79,19 @@ func TestEndpointMetricsAreSortedByP95(t *testing.T) {
 	}
 	if summary.Endpoints[0].Requests != 1 || summary.Endpoints[0].Errors != 1 || summary.Endpoints[0].ErrorRate != 1 {
 		t.Fatalf("endpoint error metrics = %#v", summary.Endpoints[0])
+	}
+}
+
+func TestEndpointMetricsAggregateAcrossWorkers(t *testing.T) {
+	parent := NewCollector("http://example.com", "GET", 2)
+	parent.Start()
+	workers := parent.NewWorkerCollectors(2)
+	workers[0].Record(models.RequestResult{Endpoint: "http://example.com/users/alice", Latency: time.Millisecond, Success: true})
+	workers[1].Record(models.RequestResult{Endpoint: "http://example.com/users/bob", Latency: 3 * time.Millisecond, Success: false})
+	parent.Stop()
+	summary := parent.Summary()
+	if len(summary.Endpoints) != 1 || summary.Endpoints[0].Endpoint != "http://example.com/users/:id" || summary.Endpoints[0].Requests != 2 || summary.Endpoints[0].Errors != 1 {
+		t.Fatalf("worker endpoint aggregation = %#v", summary.Endpoints)
 	}
 }
 
