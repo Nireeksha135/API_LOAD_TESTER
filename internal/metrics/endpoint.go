@@ -38,15 +38,12 @@ func newEndpointRegistry() *endpointRegistry {
 }
 
 var (
-	idSegment     = regexp.MustCompile(`(?i)^(?:[0-9]+|[0-9a-f]{24}|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}|[a-z0-9_-]{6,})$`)
+	numericID     = regexp.MustCompile(`^[0-9]+$`)
+	hexID         = regexp.MustCompile(`(?i)^[0-9a-f]{24}$`)
+	uuidID        = regexp.MustCompile(`(?i)^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$`)
+	mixedID       = regexp.MustCompile(`(?i)^[a-z0-9]{6,}$`)
 	templateToken = regexp.MustCompile(`\{\{[^}]+\}\}`)
 )
-
-var collectionSegments = map[string]struct{}{
-	"users": {}, "orders": {}, "products": {}, "items": {}, "accounts": {}, "customers": {},
-	"sessions": {}, "tokens": {}, "comments": {}, "posts": {}, "projects": {}, "repositories": {},
-	"repos": {}, "files": {}, "devices": {}, "records": {}, "events": {}, "invoices": {}, "payments": {},
-}
 
 // NormalizeEndpoint groups common dynamic path IDs and removes query strings and trailing slashes.
 // Callers should pass configured URL templates so {{counter}} and {{random}} never become distinct endpoints.
@@ -62,11 +59,7 @@ func NormalizeEndpoint(raw string) string {
 		if segment == "" {
 			continue
 		}
-		previousIsCollection := false
-		if i > 0 {
-			_, previousIsCollection = collectionSegments[strings.ToLower(segments[i-1])]
-		}
-		if (idSegment.MatchString(segment) && (isMixedAlphaNumeric(segment) || isNumericOrUUID(segment))) || previousIsCollection {
+		if isDynamicID(segment) {
 			segments[i] = ":id"
 		}
 	}
@@ -85,7 +78,13 @@ func NormalizeEndpoint(raw string) string {
 	return u.Scheme + "://" + u.Host + u.EscapedPath()
 }
 
-func isMixedAlphaNumeric(segment string) bool {
+func isDynamicID(segment string) bool {
+	if numericID.MatchString(segment) || hexID.MatchString(segment) || uuidID.MatchString(segment) {
+		return true
+	}
+	if !mixedID.MatchString(segment) {
+		return false
+	}
 	hasLetter, hasDigit := false, false
 	for _, r := range segment {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
@@ -98,20 +97,7 @@ func isMixedAlphaNumeric(segment string) bool {
 	return hasLetter && hasDigit
 }
 
-func isNumericOrUUID(segment string) bool {
-	if segment == "" {
-		return false
-	}
-	for _, r := range segment {
-		if (r < '0' || r > '9') && r != '-' && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
-			return false
-		}
-	}
-	return true
-}
-
-func (r *endpointRegistry) record(raw string, shard int, result models.RequestResult) {
-	key := NormalizeEndpoint(raw)
+func (r *endpointRegistry) record(key string, shard int, result models.RequestResult) {
 	r.mu.RLock()
 	metric := r.endpoints[key]
 	r.mu.RUnlock()
