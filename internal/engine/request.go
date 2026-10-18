@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Nireeksha135/API_LOAD_TESTER/internal/config"
+	"github.com/Nireeksha135/API_LOAD_TESTER/internal/metrics"
 )
 
 type requestTemplate struct {
@@ -70,6 +71,13 @@ func newRequestTemplate(cfg *config.Config) *requestTemplate {
 
 func (t *requestTemplate) needsRequestID() bool {
 	return len(t.urls) > 1 || t.needsCounter
+}
+
+func (t *requestTemplate) endpoint(counter uint64) string {
+	if counter == 0 {
+		counter = 1
+	}
+	return metrics.NormalizeEndpoint(t.urls[(counter-1)%uint64(len(t.urls))])
 }
 
 func (t *requestTemplate) newRequest(ctx context.Context, counter uint64) (*http.Request, error) {
