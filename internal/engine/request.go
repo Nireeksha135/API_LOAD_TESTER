@@ -18,6 +18,7 @@ import (
 type requestTemplate struct {
 	method             string
 	urls               []string
+	endpoints          []string
 	headers            map[string]string
 	contentType        string
 	bodyBytes          []byte
@@ -51,6 +52,7 @@ func newRequestTemplate(cfg *config.Config) *requestTemplate {
 		template.urls = []string{cfg.TargetURL}
 	}
 	for _, targetURL := range template.urls {
+		template.endpoints = append(template.endpoints, metrics.NormalizeEndpoint(targetURL))
 		template.dynamicURL = template.dynamicURL || strings.Contains(targetURL, "{{")
 		template.needsCounter = template.needsCounter || strings.Contains(targetURL, "{{counter}}")
 		template.needsRandom = template.needsRandom || strings.Contains(targetURL, "{{random}}")
@@ -77,7 +79,7 @@ func (t *requestTemplate) endpoint(counter uint64) string {
 	if counter == 0 {
 		counter = 1
 	}
-	return metrics.NormalizeEndpoint(t.urls[(counter-1)%uint64(len(t.urls))])
+	return t.endpoints[(counter-1)%uint64(len(t.endpoints))]
 }
 
 func (t *requestTemplate) newRequest(ctx context.Context, counter uint64) (*http.Request, error) {
