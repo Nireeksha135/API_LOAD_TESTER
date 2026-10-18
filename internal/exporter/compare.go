@@ -23,10 +23,11 @@ type reportMetrics struct {
 }
 
 type Regression struct {
-	Name          string
-	ChangePercent float64
-	Worse         bool
-	ExceedsLimit  bool
+	Name         string
+	ChangeValue  float64
+	ChangeUnit   string
+	Worse        bool
+	ExceedsLimit bool
 }
 
 // CompareJSON compares two JSON reports and returns metric changes.
@@ -92,8 +93,13 @@ func CompareJSONDetailed(baselinePath, currentPath string, maxRegression float64
 	results := make([]Regression, 0, len(values))
 	for _, v := range values {
 		change := 0.0
+		changeUnit := "%"
 		if v.before == 0 {
-			if v.after > 0 {
+			if v.name == "Error rate" {
+				// With no baseline failures, report the absolute error-rate increase in percentage points.
+				change = v.after * 100
+				changeUnit = "pp"
+			} else if v.after > 0 {
 				change = math.Inf(1)
 			} else if v.after < 0 {
 				change = -100
@@ -106,7 +112,7 @@ func CompareJSONDetailed(baselinePath, currentPath string, maxRegression float64
 			worse = change < 0
 		}
 		exceedsLimit := maxRegression >= 0 && worse && abs(change) > maxRegression
-		results = append(results, Regression{Name: v.name, ChangePercent: change, Worse: worse, ExceedsLimit: exceedsLimit})
+		results = append(results, Regression{Name: v.name, ChangeValue: change, ChangeUnit: changeUnit, Worse: worse, ExceedsLimit: exceedsLimit})
 	}
 	return results, warnings, nil
 }
