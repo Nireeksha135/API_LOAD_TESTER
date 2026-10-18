@@ -51,17 +51,16 @@ func Compare(args []string, out, errOut io.Writer) error {
 	}
 	failed := false
 	for _, r := range results {
-		change := fmt.Sprintf("%+0.2f%%", r.ChangePercent)
-		if math.IsInf(r.ChangePercent, 1) {
+		change := fmt.Sprintf("%+0.2f%s", r.ChangeValue, r.ChangeUnit)
+		if math.IsInf(r.ChangeValue, 1) {
 			change = "new from 0"
 		}
 		fmt.Fprintf(out, "%-28s %s", r.Name, change)
-		if r.Worse {
-			fmt.Fprintf(out, "  REGRESSION")
-		}
 		if r.ExceedsLimit {
-			fmt.Fprintf(out, " (limit exceeded)")
+			fmt.Fprintf(out, "  REGRESSION (limit exceeded)")
 			failed = true
+		} else if r.Worse {
+			fmt.Fprint(out, "  worse")
 		}
 		fmt.Fprintln(out)
 	}
