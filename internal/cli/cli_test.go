@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"errors"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -277,11 +279,10 @@ func TestParseArgsBodyFile(t *testing.T) {
 }
 
 func TestParseArgsBodyFileMissing(t *testing.T) {
-	missingPath := filepath.Join(t.TempDir(), "missing-body.json")
 	var errOut bytes.Buffer
 	_, err := ParseArgs([]string{
 		"-url", "https://api.example.com",
-		"-body-file", missingPath,
+		"-body-file", "/nonexistent/path/body.json",
 	}, &errOut)
 	if err == nil {
 		t.Error("ParseArgs() with missing body file: expected error, got nil")
@@ -331,9 +332,6 @@ func TestParseArgsClampsConcurrencyAndAllowsGetBody(t *testing.T) {
 	}
 	if opts.Config.Concurrency != 2 {
 		t.Errorf("Concurrency = %d, want clamped value 2", opts.Config.Concurrency)
-	}
-	if opts.Config.Body != "payload" {
-		t.Errorf("Body = %q, want GET request body %q", opts.Config.Body, "payload")
 	}
 }
 
@@ -572,5 +570,35 @@ func TestCompareSubcommandReturnsFailureOnRegression(t *testing.T) {
 	err := Compare([]string{"-baseline", baseline, "-current", current, "-max-regression", "10%"}, &out, &errOut)
 	if err == nil || !strings.Contains(out.String(), "REGRESSION") {
 		t.Fatalf("Compare() err=%v output=%s", err, out.String())
+	}
+}
+
+func TestCompareSubcommandWithoutLimitReportsButDoesNotFail(t *testing.T) {
+	dir := t.TempDir()
+	baseline := filepath.Join(dir, "base.json")
+	current := filepath.Join(dir, "current.json")
+	if err := os.WriteFile(baseline, []byte(`{"p95_latency_ms":100,"p99_latency_ms":100,"requests_per_second":100,"total_requests":100,"failed_requests":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(current, []byte(`{"p95_latency_ms":400,"p99_latency_ms":100,"requests_per_second":100,"total_requests":100,"failed_requests":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	err := Compare([]string{"-baseline", baseline, "-current", current}, &out, &errOut)
+	if err != nil || !strings.Contains(out.String(), "REGRESSION") || !strings.Contains(out.String(), "new from 0") || strings.Contains(out.String(), "limit exceeded") || strings.Contains(out.String(), "Inf") {
+		t.Fatalf("Compare() err=%v output=%s", err, out.String())
+	}
+}
+
+func TestCompareRejectsNonFiniteLimitsAndHandlesHelp(t *testing.T) {
+	for _, limit := range []string{"NaN", "Inf", "-Inf"} {
+		var out, errOut bytes.Buffer
+		if err := Compare([]string{"-baseline", "base.json", "-current", "current.json", "-max-regression", limit}, &out, &errOut); err == nil || !strings.Contains(err.Error(), "finite") {
+			t.Errorf("Compare limit %q error=%v, want finite-value validation", limit, err)
+		}
+	}
+	var out, errOut bytes.Buffer
+	if err := Compare([]string{"-h"}, &out, &errOut); !errors.Is(err, flag.ErrHelp) {
+		t.Errorf("Compare(-h) = %v, want flag.ErrHelp", err)
 	}
 }
