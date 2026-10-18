@@ -167,7 +167,7 @@ func TestCompareJSONReportsRegressionDirectionAndThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 4 || !results[0].Worse || !results[0].ExceedsLimit || results[0].ChangePercent < 23.9 || results[0].ChangePercent > 24.1 || !results[2].Worse || !results[2].ExceedsLimit || !results[3].Worse || !results[3].ExceedsLimit {
+	if len(results) != 4 || !results[0].Worse || !results[0].ExceedsLimit || results[0].ChangeValue < 23.9 || results[0].ChangeValue > 24.1 || !results[2].Worse || !results[2].ExceedsLimit || !results[3].Worse || !results[3].ExceedsLimit {
 		t.Fatalf("comparison = %#v", results)
 	}
 }
@@ -199,6 +199,9 @@ func TestCompareJSONZeroBaselineImprovementAndThroughputOnlyRegression(t *testin
 	}
 	if !results[2].ExceedsLimit {
 		t.Errorf("throughput-only regression missed: %#v", results[2])
+	}
+	if results[3].ChangeUnit != "pp" || results[3].ChangeValue != 10 || results[3].ExceedsLimit {
+		t.Errorf("zero-baseline error rate should use percentage-point delta and respect limit: %#v", results[3])
 	}
 }
 
