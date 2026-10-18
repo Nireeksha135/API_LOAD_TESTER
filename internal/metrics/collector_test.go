@@ -14,7 +14,15 @@ import (
 func TestEndpointNormalization(t *testing.T) {
 	cases := map[string]string{
 		"https://api.example.com/products/123?token=secret":      "https://api.example.com/products/:id",
-		"https://api.example.com/users/alice":                    "https://api.example.com/users/:id",
+		"https://api.example.com/users/alice":                    "https://api.example.com/users/alice",
+		"https://api.example.com/users/me":                       "https://api.example.com/users/me",
+		"https://api.example.com/users/search":                   "https://api.example.com/users/search",
+		"https://api.example.com/orders/export":                  "https://api.example.com/orders/export",
+		"https://api.example.com/events/stream":                  "https://api.example.com/events/stream",
+		"https://api.example.com/files/report.pdf":               "https://api.example.com/files/report.pdf",
+		"https://api.example.com/oauth2-token":                   "https://api.example.com/oauth2-token",
+		"https://api.example.com/decade":                         "https://api.example.com/decade",
+		"https://api.example.com/facade/x":                       "https://api.example.com/facade/x",
 		"https://api.example.com/o/12ab34":                       "https://api.example.com/o/:id",
 		"https://api.example.com/users/5f1d00000000000000007a7b": "https://api.example.com/users/:id",
 		"https://api.example.com/orders/{{random}}/":             "https://api.example.com/orders/:id",
@@ -48,8 +56,8 @@ func TestEndpointCountIsBounded(t *testing.T) {
 
 func TestEndpointCancelledRequestsAreShownAndExcludedFromErrorRate(t *testing.T) {
 	c := NewCollector("http://example.com", "GET", 1)
-	c.Record(models.RequestResult{Endpoint: "http://example.com/orders/1", Latency: time.Millisecond, Success: true})
-	c.Record(models.RequestResult{Endpoint: "http://example.com/orders/2", Latency: time.Millisecond, Cancelled: true})
+	c.Record(models.RequestResult{Endpoint: NormalizeEndpoint("http://example.com/orders/1"), Latency: time.Millisecond, Success: true})
+	c.Record(models.RequestResult{Endpoint: NormalizeEndpoint("http://example.com/orders/2"), Latency: time.Millisecond, Cancelled: true})
 	endpoint := c.Summary().Endpoints[0]
 	if endpoint.Requests != 2 || endpoint.CancelledRequests != 1 || endpoint.Errors != 0 || endpoint.ErrorRate != 0 {
 		t.Fatalf("endpoint metrics = %#v", endpoint)
@@ -86,8 +94,8 @@ func TestEndpointMetricsAggregateAcrossWorkers(t *testing.T) {
 	parent := NewCollector("http://example.com", "GET", 2)
 	parent.Start()
 	workers := parent.NewWorkerCollectors(2)
-	workers[0].Record(models.RequestResult{Endpoint: "http://example.com/users/alice", Latency: time.Millisecond, Success: true})
-	workers[1].Record(models.RequestResult{Endpoint: "http://example.com/users/bob", Latency: 3 * time.Millisecond, Success: false})
+	workers[0].Record(models.RequestResult{Endpoint: NormalizeEndpoint("http://example.com/users/42"), Latency: time.Millisecond, Success: true})
+	workers[1].Record(models.RequestResult{Endpoint: NormalizeEndpoint("http://example.com/users/43"), Latency: 3 * time.Millisecond, Success: false})
 	parent.Stop()
 	summary := parent.Summary()
 	if len(summary.Endpoints) != 1 || summary.Endpoints[0].Endpoint != "http://example.com/users/:id" || summary.Endpoints[0].Requests != 2 || summary.Endpoints[0].Errors != 1 {
