@@ -21,8 +21,15 @@ func main() {
 func mainWithExitCode() int {
 	if len(os.Args) > 1 && os.Args[1] == "compare" {
 		if err := cli.Compare(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			return 1
+			var regression cli.RegressionError
+			if errors.As(err, &regression) {
+				return 1
+			}
+			return 2
 		}
 		return 0
 	}
