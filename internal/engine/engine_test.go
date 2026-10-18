@@ -28,6 +28,18 @@ func newTestConfig(targetURL string) *config.Config {
 	return cfg
 }
 
+func TestRequestTemplateEndpointGroupsDynamicTokens(t *testing.T) {
+	cfg := newTestConfig("https://api.example.com/users/{{random}}/")
+	template := newRequestTemplate(cfg)
+	want := "https://api.example.com/users/:id"
+	if got := template.endpoint(1); got != want {
+		t.Fatalf("endpoint(1) = %q, want %q", got, want)
+	}
+	if got := template.endpoint(2); got != want {
+		t.Fatalf("endpoint(2) = %q, want %q", got, want)
+	}
+}
+
 func TestEngineRunCountMode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
