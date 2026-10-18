@@ -5,10 +5,7 @@ package metrics
 
 import (
 	"errors"
-	"net/url"
-	"regexp"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -65,7 +62,8 @@ type Collector struct {
 	statusCodeCounts map[int]int64
 	latencies        *hdrhistogram.Histogram
 	errorCounts      map[string]int64
-	endpointStats    map[string]*endpointMetric
+	endpointRegistry *endpointRegistry
+	endpointShard    int
 	resultObserver   func(models.RequestResult) error
 	recordingErr     error
 	workers          []*Collector
@@ -84,7 +82,7 @@ func NewCollector(targetURL, method string, concurrency int, opts ...Option) *Co
 		statusCodeCounts: make(map[int]int64),
 		latencies:        hdrhistogram.New(1, maxLatencyNanoseconds, 2),
 		errorCounts:      make(map[string]int64),
-		endpointStats:    make(map[string]*endpointMetric),
+		endpointRegistry: newEndpointRegistry(),
 	}
 
 	for _, opt := range opts {
@@ -129,6 +127,8 @@ func (c *Collector) NewWorkerCollectors(count int) []*Collector {
 		worker := NewCollector(c.targetURL, c.method, c.concurrency, opts...)
 		worker.startTime = c.startTime
 		worker.timeSeries = c.timeSeries
+		worker.endpointRegistry = c.endpointRegistry
+		worker.endpointShard = i % endpointShardCount
 		workers[i] = worker
 	}
 	c.workers = append(c.workers, workers...)
@@ -174,21 +174,7 @@ func (c *Collector) Record(result models.RequestResult) {
 		c.errorCounts[errorGroupKey(result.Err)]++
 	}
 	if result.Endpoint != "" {
-		m := c.endpointStats[result.Endpoint]
-		if m == nil {
-			m = &endpointMetric{hist: hdrhistogram.New(1, maxLatencyNanoseconds, 2)}
-			c.endpointStats[result.Endpoint] = m
-		}
-		m.requests++
-		if !result.Success && !result.Cancelled {
-			m.errors++
-		}
-		m.sum += result.Latency
-		latency := result.Latency.Nanoseconds()
-		if latency < 1 {
-			latency = 1
-		}
-		_ = m.hist.RecordValue(latency)
+		c.endpointRegistry.record(result.Endpoint, c.endpointShard, result)
 	}
 
 	if c.keepRaw {
@@ -278,7 +264,7 @@ type aggregate struct {
 	maxLatency        time.Duration
 	statusCodeCounts  map[int]int64
 	errorCounts       map[string]int64
-	endpointStats     map[string]*endpointMetric
+	endpoints         []models.EndpointSummary
 	latencies         *hdrhistogram.Histogram
 	timeSeries        map[int64]*secondBucket
 }
@@ -287,10 +273,10 @@ func (c *Collector) aggregateLocked(includeHistogram bool) aggregate {
 	a := aggregate{
 		statusCodeCounts: make(map[int]int64, len(c.statusCodeCounts)),
 		errorCounts:      make(map[string]int64, len(c.errorCounts)),
-		endpointStats:    make(map[string]*endpointMetric),
 	}
 	if includeHistogram {
 		a.latencies = hdrhistogram.New(1, maxLatencyNanoseconds, 2)
+		a.endpoints = c.endpointRegistry.summary()
 	}
 	a.addCollectorLocked(c, includeHistogram)
 	for _, worker := range c.workers {
@@ -324,17 +310,6 @@ func (a *aggregate) addCollectorLocked(c *Collector, includeHistogram bool) {
 	}
 	for message, count := range c.errorCounts {
 		a.errorCounts[message] += count
-	}
-	for endpoint, metric := range c.endpointStats {
-		merged := a.endpointStats[endpoint]
-		if merged == nil {
-			merged = &endpointMetric{hist: hdrhistogram.New(1, maxLatencyNanoseconds, 2)}
-			a.endpointStats[endpoint] = merged
-		}
-		merged.requests += metric.requests
-		merged.errors += metric.errors
-		merged.sum += metric.sum
-		merged.hist.Merge(metric.hist)
 	}
 	if includeHistogram {
 		a.latencies.Merge(c.latencies)
@@ -434,25 +409,6 @@ func (c *Collector) Summary() models.Summary {
 		throughputBytesPerSecond = float64(data.totalBytesRead) / seconds
 	}
 	timeSeries := data.timeSeriesPoints(totalDuration)
-	endpoints := make([]models.EndpointSummary, 0, len(data.endpointStats))
-	for endpoint, metric := range data.endpointStats {
-		var errorRate float64
-		if metric.requests > 0 {
-			errorRate = float64(metric.errors) / float64(metric.requests)
-		}
-		var mean time.Duration
-		if metric.requests > 0 {
-			mean = time.Duration(int64(metric.sum) / metric.requests)
-		}
-		endpoints = append(endpoints, models.EndpointSummary{Endpoint: endpoint, Requests: metric.requests, Errors: metric.errors, ErrorRate: errorRate, MeanLatency: mean, P95: time.Duration(metric.hist.ValueAtQuantile(95)), P99: time.Duration(metric.hist.ValueAtQuantile(99))})
-	}
-	sort.Slice(endpoints, func(i, j int) bool {
-		if endpoints[i].P95 == endpoints[j].P95 {
-			return endpoints[i].Endpoint < endpoints[j].Endpoint
-		}
-		return endpoints[i].P95 > endpoints[j].P95
-	})
-
 	return models.Summary{
 		TargetURL:                c.targetURL,
 		Method:                   c.method,
@@ -478,32 +434,6 @@ func (c *Collector) Summary() models.Summary {
 		ThroughputBytesPerSecond: throughputBytesPerSecond,
 		Errors:                   data.errorCounts,
 		TimeSeries:               timeSeries,
-		Endpoints:                endpoints,
+		Endpoints:                data.endpoints,
 	}
-}
-
-type endpointMetric struct {
-	requests, errors int64
-	sum              time.Duration
-	hist             *hdrhistogram.Histogram
-}
-
-var numericSegment = regexp.MustCompile(`^(?:[0-9]+|[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,})$`)
-
-// NormalizeEndpoint groups dynamic numeric/UUID path segments and removes query parameters.
-func NormalizeEndpoint(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return raw
-	}
-	parts := strings.Split(u.EscapedPath(), "/")
-	for i := range parts {
-		if numericSegment.MatchString(parts[i]) {
-			parts[i] = ":id"
-		}
-	}
-	u.RawQuery = ""
-	u.Fragment = ""
-	u.Path = ""
-	return u.Scheme + "://" + u.Host + strings.Join(parts, "/")
 }
