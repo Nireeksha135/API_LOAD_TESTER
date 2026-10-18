@@ -152,13 +152,14 @@ type Summary struct {
 
 // EndpointSummary contains aggregated request metrics for one normalized endpoint.
 type EndpointSummary struct {
-	Endpoint    string        `json:"endpoint"`
-	Requests    int64         `json:"requests"`
-	Errors      int64         `json:"errors"`
-	ErrorRate   float64       `json:"error_rate"`
-	MeanLatency time.Duration `json:"mean_latency_ns"`
-	P95         time.Duration `json:"p95_latency_ns"`
-	P99         time.Duration `json:"p99_latency_ns"`
+	Endpoint          string        `json:"endpoint"`
+	Requests          int64         `json:"requests"`
+	Errors            int64         `json:"errors"`
+	CancelledRequests int64         `json:"cancelled_requests"`
+	ErrorRate         float64       `json:"error_rate"`
+	MeanLatency       time.Duration `json:"mean_latency_ns"`
+	P95               time.Duration `json:"p95_latency_ns"`
+	P99               time.Duration `json:"p99_latency_ns"`
 }
 
 type TimeSeriesPoint struct {
