@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -55,5 +56,31 @@ func TestMainWithExitCodeThresholdFailure(t *testing.T) {
 
 	if got := mainWithExitCode(); got != 1 {
 		t.Errorf("mainWithExitCode() = %d, want 1 when a threshold fails", got)
+	}
+}
+
+func TestCompareCommandExitCodes(t *testing.T) {
+	originalArgs := os.Args
+	defer func() { os.Args = originalArgs }()
+	os.Args = []string{"api-load-tester", "compare", "-h"}
+	if got := mainWithExitCode(); got != 0 {
+		t.Errorf("compare help exit = %d, want 0", got)
+	}
+	os.Args = []string{"api-load-tester", "compare", "-bad"}
+	if got := mainWithExitCode(); got != 2 {
+		t.Errorf("compare usage error exit = %d, want 2", got)
+	}
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base.json")
+	current := filepath.Join(dir, "current.json")
+	if err := os.WriteFile(base, []byte(`{"p95_latency_ms":100,"p99_latency_ms":100,"requests_per_second":100,"total_requests":10,"failed_requests":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(current, []byte(`{"p95_latency_ms":200,"p99_latency_ms":100,"requests_per_second":100,"total_requests":10,"failed_requests":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.Args = []string{"api-load-tester", "compare", "-baseline", base, "-current", current, "-max-regression", "10%"}
+	if got := mainWithExitCode(); got != 1 {
+		t.Errorf("compare regression exit = %d, want 1", got)
 	}
 }
