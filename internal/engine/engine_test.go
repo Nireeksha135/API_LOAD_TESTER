@@ -696,4 +696,3 @@ func TestNewRejectsNilCollector(t *testing.T) {
 		t.Error("New() with nil collector: expected error, got nil")
 	}
 }
-
