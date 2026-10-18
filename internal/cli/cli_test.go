@@ -585,7 +585,7 @@ func TestCompareSubcommandWithoutLimitReportsButDoesNotFail(t *testing.T) {
 	}
 	var out, errOut bytes.Buffer
 	err := Compare([]string{"-baseline", baseline, "-current", current}, &out, &errOut)
-	if err != nil || !strings.Contains(out.String(), "REGRESSION") || !strings.Contains(out.String(), "new from 0") || strings.Contains(out.String(), "limit exceeded") || strings.Contains(out.String(), "Inf") {
+	if err != nil || !strings.Contains(out.String(), "worse") || strings.Contains(out.String(), "REGRESSION") || !strings.Contains(out.String(), "+1.00pp") || strings.Contains(out.String(), "Inf") {
 		t.Fatalf("Compare() err=%v output=%s", err, out.String())
 	}
 }
